@@ -13,4 +13,4 @@ for img_file_name in glob.glob(os.path.join("data/ground_truths/", "*.png")):
     th3 = cv2.adaptiveThreshold(img,255,cv2.ADAPTIVE_THRESH_GAUSSIAN_C,\
     cv2.THRESH_BINARY,35,5)
     cv2.imwrite(img_file_name, th3)
-    
+
