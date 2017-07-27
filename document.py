@@ -1,17 +1,31 @@
-import argparse
-import cv2
-import hashlib
-import numpy as np
+"""
+A synthetic handwritten Document
+
+This module includes the Document class.
+"""
+import errno
 import os
 import random
 import subprocess
 import sys
 import shutil
 
+import cv2
+import numpy as np
+
 from lxml import etree
-from PIL import ImageFont, ImageDraw, Image, ImageOps
+from PIL import Image
+
 
 class Document:
+    """
+    A synthetic handwritten Document
+
+    A Document instance is a synthetic, handwritten, text image. This class
+    handles the generation of such images. It also has helper functions that
+    allow for the saving of the generated images to disk.
+    """
+
     def __init__(self, stain_level=1, noise_level=1, seed=None):
         """
         Initialize a new Document
@@ -44,8 +58,9 @@ class Document:
         self.word_blur_sigma_high_bound = 1 + 0.1 * self.text_noisy_level
         self.word_margin = 5
         self.result = None
+        self.result_ground_truth = None
 
-        if seed != None:
+        if seed is not None:
             self.random_seed = seed
         else:
             # Make sure seed is set, in case multiple proccesses/threads
@@ -59,18 +74,16 @@ class Document:
 
         self.gather_data_sources()
 
-
     def gather_data_sources(self):
+        """ Parse lists of needed directories. """
+
         self.transformed_words_dest_path = "data/transformed_words/"
         self.word_image_folder_list = []
 
-        #Read a file to load word images
-        # self.word_image_location_file = open("paths/word_image_folder_paths.txt","r")
-        # self.word_image_folder_list = self.word_image_location_file.readlines()
-        for dir in os.listdir("/data/synthetic/handwriting/iamdb"):
-            files = os.listdir("/data/synthetic/handwriting/iamdb/" + dir)
+        for hw_dir in os.listdir("/data/synthetic/handwriting/iamdb"):
+            files = os.listdir("/data/synthetic/handwriting/iamdb/" + hw_dir)
 
-            new_path = "/data/synthetic/handwriting/iamdb/" + dir + "/"
+            new_path = "/data/synthetic/handwriting/iamdb/" + hw_dir + "/"
 
             for idx, item in enumerate(files):
                 # subfolders = os.listdir(new_path + item)
@@ -80,26 +93,22 @@ class Document:
 
             self.word_image_folder_list += files
 
-
-        # for idx, item in enumerate(self.word_image_folder_list):
-            # self.word_image_folder_list[idx] = item.rstrip('\r\n')
-
-        #Read a file to load background images
-        self.bg_image_location_file = open("paths/word_bg_folder_paths.txt","r")
+        # Read a file to load background images
+        self.bg_image_location_file = open("paths/word_bg_folder_paths.txt",
+                                           "r")
         self.bg_image_folder_list = self.bg_image_location_file.readlines()
 
-        self.bg_image_folder_list = [ "/data/synthetic/backgrounds/" ]
+        self.bg_image_folder_list = ["/data/synthetic/backgrounds/"]
 
         # for idx, item in enumerate(self.bg_image_folder_list):
-            # self.bg_image_folder_list[idx] = item.rstrip('\r\n')
+        #     self.bg_image_folder_list[idx] = item.rstrip('\r\n')
 
-        #Read a file to load stain paths
-        self.stain_paths_file = open("paths/stain_folder_paths.txt","r")
+        # Read a file to load stain paths
+        self.stain_paths_file = open("paths/stain_folder_paths.txt", "r")
         self.stain_paths_list = self.stain_paths_file.readlines()
 
         for idx, item in enumerate(self.stain_paths_list):
             self.stain_paths_list[idx] = item.rstrip('\r\n')
-
 
     def create(self):
         """
@@ -127,26 +136,37 @@ class Document:
 
         # Generate XML for DivaDID and then degrade background image
         print("- Generating degraded image - pass 1")
-        first_xml, first_out = self.generate_degradation_xml(bg_full_path, 1, True, base_working_dir)
-        subprocess.check_call(["java", "-jar", "DivaDid.jar", first_xml], stdout=subprocess.DEVNULL)
+        first_xml, first_out = self.generate_degradation_xml(bg_full_path,
+                                                             1,
+                                                             True,
+                                                             base_working_dir)
+
+        subprocess.check_call(["java", "-jar", "DivaDid.jar", first_xml],
+                              stdout=subprocess.DEVNULL)
 
         # Add text to degraded background image
         print("- Adding text to image")
         img = Image.open(first_out)
         text_augmented_img = self.add_text(img)
-        text_augmented_img.save("/dev/shm/" + str(self.random_seed) + "_augmented.png")
+        text_augmented_img.save(
+            "/dev/shm/" + str(self.random_seed) + "_augmented.png")
 
         # Generate XML for second pass of DivaDID. Degrade image with text
         print("- Generating degraded image - pass 2")
-        second_xml, second_out = self.generate_degradation_xml("/dev/shm/" + str(self.random_seed) + "_augmented.png", 2, True, base_working_dir)
-        subprocess.check_call(["java", "-jar", "DivaDid.jar", second_xml], stdout=subprocess.DEVNULL)
+        second_xml, second_out = self.generate_degradation_xml(
+            "/dev/shm/" + str(self.random_seed) + "_augmented.png",
+            2,
+            True,
+            base_working_dir)
+
+        subprocess.check_call(["java", "-jar", "DivaDid.jar", second_xml],
+                              stdout=subprocess.DEVNULL)
 
         self.result = second_out
 
         os.remove(first_xml)
         os.remove(second_xml)
         os.remove(first_out)
-
 
     def save(self, base_dir=None, file=None):
         """
@@ -159,7 +179,8 @@ class Document:
         """
 
         if self.result is None:
-            print("Trying to save document before it has been generated.", file=sys.stderr)
+            print("Trying to save document before it has been generated.",
+                  file=sys.stderr)
             return
 
         if file is None:
@@ -167,6 +188,12 @@ class Document:
 
         if isinstance(base_dir, str):
             file = base_dir + '/' + file
+
+            try:
+                os.makedirs(base_dir)
+            except OSError as exception:
+                if exception.errno != errno.EEXIST:
+                    raise
 
         print("File saved to {}".format(file))
         shutil.copy2(self.result, file)
@@ -184,7 +211,8 @@ class Document:
         """
 
         if self.result is None:
-            print("Trying to save document before it has been generated.", file=sys.stderr)
+            print("Trying to save document before it has been generated.",
+                  file=sys.stderr)
             return
 
         if file is None:
@@ -196,25 +224,24 @@ class Document:
         print("File saved to {}".format(file))
         shutil.copy2(self.result_ground_truth, file)
 
+    @staticmethod
+    def white_to_alpha(img, color=None):
+        """ Convert white values in an image to alpha.  """
 
-    def white_to_alpha(self, img, color=[0, 0, 0]):
+        if color is None:
+            color = [0, 0, 0]
 
-        img[:,:,3] = 255 - img[:,:,0]
+        img[:, :, 3] = 255 - img[:, :, 0]
 
-        img[:,:,0:3] = color
+        img[:, :, 0:3] = color
 
-        img_clipped = np.minimum(255 - img[:,:,3], 40)
-        np.putmask(img[:,:,3], img[:,:,3] > 30, img[:,:,3] + img_clipped)
-
+        img_clipped = np.minimum(255 - img[:, :, 3], 40)
+        np.putmask(img[:, :, 3], img[:, :, 3] > 30, img[:, :, 3] + img_clipped)
 
     def add_text(self, img):
-        """
-        Add text samples to given image.
-
-        """
+        """ Add text samples to given image.  """
 
         not_done = True
-        height_scale = -1
         color = np.array((53, 52, 46))
 
         background_width = img.size[0]
@@ -229,7 +256,6 @@ class Document:
         space_between_words = int(np.clip(np.random.normal(1, 0.1, 1), 0, 0.05) * background_width)
 
         line_height_variation = np.clip(np.random.normal(1, 0.1, 1), -.5, .5)
-        line_start_variation = np.clip(np.random.normal(1, 0.1, 1), 0, .5)
 
         avg_line_vertical_scale = (text_end_position[0] - text_start_position[0]) / num_lines
         avg_line_height = background_height * avg_line_vertical_scale
@@ -250,7 +276,8 @@ class Document:
         x_offset = int(np.rint(text_start_position[0] * background_width))
         y_offset = int(np.rint(text_start_position[1] * background_height))
 
-        while(not_done):
+        # Add individual words until we run out of space
+        while not_done:
 
             word_image_name = random.choice(os.listdir(word_rand_folder))
             word_full_path = word_rand_folder + word_image_name
@@ -283,7 +310,7 @@ class Document:
             ground_truth_word = ground_truth_word.crop((-x_offset, -y_offset, background_width - x_offset, background_height - y_offset))
 
             img = Image.alpha_composite(img, word)
-            ground_truth.paste(ground_truth_word, mask=ground_truth_word)# = Image.alpha_composite(ground_truth, ground_truth_word)
+            ground_truth.paste(ground_truth_word, mask=ground_truth_word)  # = Image.alpha_composite(ground_truth, ground_truth_word)
 
             x_offset += new_word_width + space_between_words
 
@@ -292,7 +319,11 @@ class Document:
 
         return img
 
-    def generate_degradation_xml(self, base_image, index=0, save=False, save_location=None):
+    def generate_degradation_xml(self,
+                                 base_image,
+                                 index=0,
+                                 save=False,
+                                 save_location=None):
         """
         Generate the XML needed by DivaDID to add surface stains to an image.
 
@@ -307,7 +338,8 @@ class Document:
         """
 
         output_file_name = "degraded_{}_{}.png".format(self.random_seed, index)
-        xml_file_name = "degradation_script_{}_{}.xml".format(self.random_seed, index)
+        xml_file_name = "degradation_script_{}_{}.xml".format(self.random_seed,
+                                                              index)
 
         if save_location is None:
             xml_full_path = "data/xml/" + xml_file_name
@@ -331,17 +363,23 @@ class Document:
         image_e2 = etree.SubElement(root, "image")
         image_e2.set("id", "my-copy")
         copy_e2 = etree.SubElement(image_e2, "copy")
-        copy_e2.set("ref","my-image")
+        copy_e2.set("ref", "my-image")
 
         # Add stains
         for stain_folder in self.stain_paths_list:
-            gradient_degradation_e = etree.SubElement(root, "gradient-degradations")
+            gradient_degradation_e = etree.SubElement(root,
+                                                      "gradient-degradations")
             gradient_degradation_e.set("ref", "my-copy")
             strength_e = etree.SubElement(gradient_degradation_e, "strength")
-            strength_e.text = "{:.2f}".format(random.uniform(self.stain_strength_low_bound, self.stain_strength_high_bound))
+            strength_e.text = "{:.2f}".format(
+                random.uniform(self.stain_strength_low_bound,
+                               self.stain_strength_high_bound))
             density_e = etree.SubElement(gradient_degradation_e, "density")
-            density_e.text = "{:.2f}".format(random.uniform(self.stain_density_low_bound, self.stain_density_high_bound))
-            iterations_e = etree.SubElement(gradient_degradation_e, "iterations")
+            density_e.text = "{:.2f}".format(
+                random.uniform(self.stain_density_low_bound,
+                               self.stain_density_high_bound))
+            iterations_e = etree.SubElement(gradient_degradation_e,
+                                            "iterations")
             iterations_e.text = "750"
             source_e = etree.SubElement(gradient_degradation_e, "source")
             source_e.text = stain_folder
@@ -350,30 +388,40 @@ class Document:
         save_e.set("ref", "my-copy")
         save_e.set("file", output_full_path)
 
-        if save == True:
+        if save is True:
             output_xml = open(xml_full_path, 'w')
-            output_xml.write(etree.tostring(root, pretty_print=True).decode("utf-8"))
+            output_xml.write(
+                etree.tostring(root, pretty_print=True).decode("utf-8"))
 
             return xml_full_path, output_full_path
-        else:
-            return root
 
+        return root
 
     def print_parameters(self):
+        """ Debug statement to print document parameter values.  """
+
         print("\n")
         print("--Parameters--")
         print("\tleft_margin: {}".format(self.left_margin))
         print("\ttop_margin: {}".format(self.top_margin))
         print("\tword_spacing: {}".format(self.word_spacing))
         print("\tline_spacing: {}".format(self.line_spacing))
-        print("\tstain_strength_range: [{}, {}]".format(self.stain_strength_low_bound, self.stain_strength_high_bound))
-        print("\tstain_density_range: [{}, {}]".format(self.stain_density_low_bound, self.stain_density_high_bound))
-        print("\tword_horizontal_shear_scale: {}".format(self.word_horizontal_shear_scale))
-        print("\tword_vertical_shear_scale: {}".format(self.word_vertical_shear_scale))
-        print("\tword_rotation_scale: {}".format(self.word_rotation_scale))
-        print("\tword_color_jitter_sigma: {}".format(self.word_color_jitter_sigma))
-        print("\tword_elastic_sigma: {}".format(self.word_elastic_sigma))
-        print("\tword_margin: {}".format(self.word_margin))
-        print("\tword_blur_sigma_range: [{}, {}]".format(self.word_blur_sigma_low_bound, self.word_blur_sigma_high_bound))
+        print("\tstain_strength_range: [{}, {}]".format(
+            self.stain_strength_low_bound, self.stain_strength_high_bound))
+        print("\tstain_density_range: [{}, {}]".format(
+            self.stain_density_low_bound, self.stain_density_high_bound))
+        print("\tword_horizontal_shear_scale: {}".format(
+            self.word_horizontal_shear_scale))
+        print("\tword_vertical_shear_scale: {}".format(
+            self.word_vertical_shear_scale))
+        print("\tword_rotation_scale: {}".format(
+            self.word_rotation_scale))
+        print("\tword_color_jitter_sigma: {}".format(
+            self.word_color_jitter_sigma))
+        print("\tword_elastic_sigma: {}".format(
+            self.word_elastic_sigma))
+        print("\tword_margin: {}".format(
+            self.word_margin))
+        print("\tword_blur_sigma_range: [{}, {}]".format(
+            self.word_blur_sigma_low_bound, self.word_blur_sigma_high_bound))
         print("\n")
-
