@@ -10,11 +10,18 @@ import subprocess
 import sys
 import shutil
 
-import cv2
 import numpy as np
 
 from lxml import etree
-from PIL import Image
+from PIL import Image, ImageFilter
+
+HANDWRITTEN_WORDS_DIR = "/data/synthetic/handwriting/iamdb/"
+BACKGROUND_IMAGES_DIR = "/data/synthetic/backgrounds/"
+STAIN_IMAGES_DIR = "/data/synthetic/spots/"
+
+# /dev/shm should be mounted in RAM - allowing for fast IPC (Used as a
+# consequence of using DivaDID.)
+TMP_DIR = "/dev/shm/"
 
 
 class Document:
@@ -41,22 +48,6 @@ class Document:
         self.stain_level = stain_level
         self.text_noisy_level = noise_level
 
-        self.left_margin = 10
-        self.top_margin = 10
-        self.word_spacing = 10
-        self.line_spacing = 10
-        self.stain_strength_low_bound = 0.1 * self.stain_level
-        self.stain_strength_high_bound = 0.1 + 0.1 * self.stain_level
-        self.stain_density_low_bound = 2 + 0.1 * self.stain_level
-        self.stain_density_high_bound = 2 + 0.1 * self.stain_level
-        self.word_horizontal_shear_scale = 5 + 2 * self.text_noisy_level
-        self.word_vertical_shear_scale = 5 + 2 * self.text_noisy_level
-        self.word_rotation_scale = 5 + 2 * self.text_noisy_level
-        self.word_color_jitter_sigma = 1 + 0.1 * self.text_noisy_level
-        self.word_elastic_sigma = 5 - 0.2 * self.text_noisy_level
-        self.word_blur_sigma_low_bound = 0.5 + 0.1 * self.text_noisy_level
-        self.word_blur_sigma_high_bound = 1 + 0.1 * self.text_noisy_level
-        self.word_margin = 5
         self.result = None
         self.result_ground_truth = None
 
@@ -77,13 +68,12 @@ class Document:
     def gather_data_sources(self):
         """ Parse lists of needed directories. """
 
-        self.transformed_words_dest_path = "data/transformed_words/"
         self.word_image_folder_list = []
 
-        for hw_dir in os.listdir("/data/synthetic/handwriting/iamdb"):
-            files = os.listdir("/data/synthetic/handwriting/iamdb/" + hw_dir)
+        for hw_dir in os.listdir(HANDWRITTEN_WORDS_DIR):
+            files = os.listdir(HANDWRITTEN_WORDS_DIR + hw_dir)
 
-            new_path = "/data/synthetic/handwriting/iamdb/" + hw_dir + "/"
+            new_path = HANDWRITTEN_WORDS_DIR + hw_dir + "/"
 
             for idx, item in enumerate(files):
                 # subfolders = os.listdir(new_path + item)
@@ -92,23 +82,6 @@ class Document:
                 files[idx] = new_path + item + "/"
 
             self.word_image_folder_list += files
-
-        # Read a file to load background images
-        self.bg_image_location_file = open("paths/word_bg_folder_paths.txt",
-                                           "r")
-        self.bg_image_folder_list = self.bg_image_location_file.readlines()
-
-        self.bg_image_folder_list = ["/data/synthetic/backgrounds/"]
-
-        # for idx, item in enumerate(self.bg_image_folder_list):
-        #     self.bg_image_folder_list[idx] = item.rstrip('\r\n')
-
-        # Read a file to load stain paths
-        self.stain_paths_file = open("paths/stain_folder_paths.txt", "r")
-        self.stain_paths_list = self.stain_paths_file.readlines()
-
-        for idx, item in enumerate(self.stain_paths_list):
-            self.stain_paths_list[idx] = item.rstrip('\r\n')
 
     def create(self):
         """
@@ -126,17 +99,16 @@ class Document:
         a somewhat more realistic appearance.
         """
 
-        base_working_dir = "/dev/shm/"
+        base_working_dir = TMP_DIR
 
         # Get a random background image
-        bg_rand_folder = random.choice(self.bg_image_folder_list)
-        bg_image_name = random.choice(os.listdir(bg_rand_folder))
+        bg_image_name = random.choice(os.listdir(BACKGROUND_IMAGES_DIR))
 
-        bg_full_path = bg_rand_folder + bg_image_name
+        bg_full_path = BACKGROUND_IMAGES_DIR + bg_image_name
 
         # Generate XML for DivaDID and then degrade background image
         print("- Generating degraded image - pass 1")
-        first_xml, first_out = self.generate_degradation_xml(bg_full_path,
+        first_xml, first_image = self.generate_degradation_xml(bg_full_path,
                                                              1,
                                                              True,
                                                              base_working_dir)
@@ -146,15 +118,23 @@ class Document:
 
         # Add text to degraded background image
         print("- Adding text to image")
-        img = Image.open(first_out)
+        img = Image.open(first_image)
         text_augmented_img = self.add_text(img)
         text_augmented_img.save(
-            "/dev/shm/" + str(self.random_seed) + "_augmented.png")
+            base_working_dir + str(self.random_seed) + "_augmented.png")
+
+        # --- TMP ---
+        self.result = base_working_dir + str(self.random_seed) + "_augmented.png"
+
+        os.remove(first_xml)
+        os.remove(first_image)
+        return
+        # --- TMP ---
 
         # Generate XML for second pass of DivaDID. Degrade image with text
         print("- Generating degraded image - pass 2")
-        second_xml, second_out = self.generate_degradation_xml(
-            "/dev/shm/" + str(self.random_seed) + "_augmented.png",
+        second_xml, second_image = self.generate_degradation_xml(
+            base_working_dir + str(self.random_seed) + "_augmented.png",
             2,
             True,
             base_working_dir)
@@ -162,11 +142,11 @@ class Document:
         subprocess.check_call(["java", "-jar", "DivaDid.jar", second_xml],
                               stdout=subprocess.DEVNULL)
 
-        self.result = second_out
+        self.result = second_image
 
         os.remove(first_xml)
         os.remove(second_xml)
-        os.remove(first_out)
+        os.remove(first_image)
 
     def save(self, base_dir=None, file=None):
         """
@@ -248,7 +228,6 @@ class Document:
         background_height = img.size[1]
 
         ground_truth = Image.new("1", (background_width, background_height), 1)
-        print(np.random.normal(0, 0.2, 2))
 
         num_lines = np.rint(np.clip(np.random.normal(15, 4), 3, 30))
         text_start_position = np.clip(np.random.normal(0, 0.2, 2), 0.01, 1)
@@ -271,7 +250,7 @@ class Document:
         word = Image.open(word_full_path)
         word_height = word.size[1]
 
-        avg_word_scale_factor = avg_line_height / word_height
+        avg_word_scale_factor = min(avg_line_height / word_height, 1.0)
 
         x_offset = int(np.rint(text_start_position[0] * background_width))
         y_offset = int(np.rint(text_start_position[1] * background_height))
@@ -284,6 +263,8 @@ class Document:
 
             word = Image.open(word_full_path)
             word = word.convert("RGBA")
+            word = word.filter(ImageFilter.GaussianBlur(2))
+
             new_word_width = int(np.rint(word.size[0] * avg_word_scale_factor))
             new_word_height = int(np.rint(word.size[1] * avg_word_scale_factor))
 
@@ -314,7 +295,7 @@ class Document:
 
             x_offset += new_word_width + space_between_words
 
-        self.result_ground_truth = "/dev/shm/" + str(self.random_seed) + "_gt.png"
+        self.result_ground_truth = TMP_DIR + str(self.random_seed) + "_gt.png"
         ground_truth.save(self.result_ground_truth)
 
         return img
@@ -341,6 +322,11 @@ class Document:
         xml_file_name = "degradation_script_{}_{}.xml".format(self.random_seed,
                                                               index)
 
+        stain_strength_low_bound = 0.1 * self.stain_level
+        stain_strength_high_bound = 0.1 + 0.1 * self.stain_level
+        stain_density_low_bound = 2 + 0.1 * self.stain_level
+        stain_density_high_bound = 2 + 0.1 * self.stain_level
+
         if save_location is None:
             xml_full_path = "data/xml/" + xml_file_name
             output_full_path = "data/output/" + output_file_name
@@ -366,18 +352,18 @@ class Document:
         copy_e2.set("ref", "my-image")
 
         # Add stains
-        for stain_folder in self.stain_paths_list:
+        for stain_folder in [STAIN_IMAGES_DIR]:  # os.listdir(STAIN_IMAGES_DIR)[0:20]:
             gradient_degradation_e = etree.SubElement(root,
                                                       "gradient-degradations")
             gradient_degradation_e.set("ref", "my-copy")
             strength_e = etree.SubElement(gradient_degradation_e, "strength")
             strength_e.text = "{:.2f}".format(
-                random.uniform(self.stain_strength_low_bound,
-                               self.stain_strength_high_bound))
+                random.uniform(stain_strength_low_bound,
+                               stain_strength_high_bound))
             density_e = etree.SubElement(gradient_degradation_e, "density")
             density_e.text = "{:.2f}".format(
-                random.uniform(self.stain_density_low_bound,
-                               self.stain_density_high_bound))
+                random.uniform(stain_density_low_bound,
+                               stain_density_high_bound))
             iterations_e = etree.SubElement(gradient_degradation_e,
                                             "iterations")
             iterations_e.text = "750"
@@ -396,32 +382,3 @@ class Document:
             return xml_full_path, output_full_path
 
         return root
-
-    def print_parameters(self):
-        """ Debug statement to print document parameter values.  """
-
-        print("\n")
-        print("--Parameters--")
-        print("\tleft_margin: {}".format(self.left_margin))
-        print("\ttop_margin: {}".format(self.top_margin))
-        print("\tword_spacing: {}".format(self.word_spacing))
-        print("\tline_spacing: {}".format(self.line_spacing))
-        print("\tstain_strength_range: [{}, {}]".format(
-            self.stain_strength_low_bound, self.stain_strength_high_bound))
-        print("\tstain_density_range: [{}, {}]".format(
-            self.stain_density_low_bound, self.stain_density_high_bound))
-        print("\tword_horizontal_shear_scale: {}".format(
-            self.word_horizontal_shear_scale))
-        print("\tword_vertical_shear_scale: {}".format(
-            self.word_vertical_shear_scale))
-        print("\tword_rotation_scale: {}".format(
-            self.word_rotation_scale))
-        print("\tword_color_jitter_sigma: {}".format(
-            self.word_color_jitter_sigma))
-        print("\tword_elastic_sigma: {}".format(
-            self.word_elastic_sigma))
-        print("\tword_margin: {}".format(
-            self.word_margin))
-        print("\tword_blur_sigma_range: [{}, {}]".format(
-            self.word_blur_sigma_low_bound, self.word_blur_sigma_high_bound))
-        print("\n")
