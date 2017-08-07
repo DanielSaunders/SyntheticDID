@@ -69,7 +69,7 @@ def generate_single_image(fn_args):
         document = Document(fn_args['args'].stain_level,
                             fn_args['args'].text_noise_level)
 
-        document.create()
+        document.create(bypass=fn_args['args'].bypass_divadid)
         document.save(base_dir=fn_args['args'].output_dir)
         document.save_ground_truth(base_dir=fn_args['args'].output_dir)
 
@@ -87,7 +87,7 @@ def main():
     """
     parser = argparse.ArgumentParser(description='Generate some images.')
     parser.add_argument('output_count', metavar='N', type=check_output_count,
-                        nargs='?', default=5,
+                        nargs='?', default=8,
                         help='number of images to generate')
     parser.add_argument('stain_level', metavar='S', type=check_level,
                         nargs='?', default=1, help='amount of noise in stains')
@@ -95,17 +95,23 @@ def main():
                         nargs='?', default=1, help='amount of noise in text')
     parser.add_argument('--output_dir', metavar='DIR', default=DEFAULT_DIR,
                         help='directory where final images are to be saved')
+    parser.add_argument('--bypass_divadid', action='store_true',
+                        help="do not pass images through DivaDID")
 
     args = parser.parse_args()
 
     print("Generating {} images in {}".format(args.output_count,
                                               args.output_dir))
 
+    # generate_single_image({'iter': 0, 'args': args})
     pool = Pool()
 
     pool.map(generate_single_image,
              list(map(lambda x: {'iter': x, 'args': args},
                       range(args.output_count))))
+
+    print("Generated {} images in {}".format(args.output_count,
+                                              args.output_dir))
 
 
 if __name__ == "__main__":

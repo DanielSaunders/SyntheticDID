@@ -10,10 +10,11 @@ import subprocess
 import sys
 import shutil
 
+import cv2
+import image_util as util
 import numpy as np
 
 from lxml import etree
-from PIL import Image, ImageFilter
 
 HANDWRITTEN_WORDS_DIR = "/data/synthetic/handwriting/iamdb/"
 BACKGROUND_IMAGES_DIR = "/data/synthetic/backgrounds/"
@@ -83,7 +84,7 @@ class Document:
 
             self.word_image_folder_list += files
 
-    def create(self):
+    def create(self, bypass=False):
         """
         Generate a synthetic text document.
 
@@ -106,6 +107,16 @@ class Document:
 
         bg_full_path = BACKGROUND_IMAGES_DIR + bg_image_name
 
+        if bypass is True:
+            print("-{} Adding text to image {} -".format(self.random_seed, bg_full_path))
+            img = cv2.imread(bg_full_path)
+            text_augmented_img = self.add_text(img)
+            cv2.imwrite(base_working_dir + str(self.random_seed) + "_augmented.png",
+                        text_augmented_img)
+
+            self.result = base_working_dir + str(self.random_seed) + "_augmented.png"
+            return
+
         # Generate XML for DivaDID and then degrade background image
         print("- Generating degraded image - pass 1")
         first_xml, first_image = self.generate_degradation_xml(bg_full_path,
@@ -117,19 +128,12 @@ class Document:
                               stdout=subprocess.DEVNULL)
 
         # Add text to degraded background image
-        print("- Adding text to image")
-        img = Image.open(first_image)
+        print("-{} Adding text to image {} -".format(self.random_seed, bg_full_path))
+        img = cv2.imread(first_image)
         text_augmented_img = self.add_text(img)
-        text_augmented_img.save(
-            base_working_dir + str(self.random_seed) + "_augmented.png")
+        cv2.imwrite(base_working_dir + str(self.random_seed) + "_augmented.png",
+                    text_augmented_img)
 
-        # --- TMP ---
-        self.result = base_working_dir + str(self.random_seed) + "_augmented.png"
-
-        os.remove(first_xml)
-        os.remove(first_image)
-        return
-        # --- TMP ---
 
         # Generate XML for second pass of DivaDID. Degrade image with text
         print("- Generating degraded image - pass 2")
@@ -204,30 +208,17 @@ class Document:
         print("File saved to {}".format(file))
         shutil.copy2(self.result_ground_truth, file)
 
-    @staticmethod
-    def white_to_alpha(img, color=None):
-        """ Convert white values in an image to alpha.  """
-
-        if color is None:
-            color = [0, 0, 0]
-
-        img[:, :, 3] = 255 - img[:, :, 0]
-
-        img[:, :, 0:3] = color
-
-        img_clipped = np.minimum(255 - img[:, :, 3], 40)
-        np.putmask(img[:, :, 3], img[:, :, 3] > 30, img[:, :, 3] + img_clipped)
-
     def add_text(self, img):
         """ Add text samples to given image.  """
 
         not_done = True
         color = np.array((53, 52, 46))
 
-        background_width = img.size[0]
-        background_height = img.size[1]
+        # TODO
+        background_height = img.shape[0]
+        background_width = img.shape[1]
 
-        ground_truth = Image.new("1", (background_width, background_height), 1)
+        ground_truth = np.ones((background_height, background_width, 3), np.uint8)
 
         num_lines = np.rint(np.clip(np.random.normal(15, 4), 3, 30))
         text_start_position = np.clip(np.random.normal(0, 0.2, 2), 0.01, 1)
@@ -239,16 +230,15 @@ class Document:
         avg_line_vertical_scale = (text_end_position[0] - text_start_position[0]) / num_lines
         avg_line_height = background_height * avg_line_vertical_scale
 
-        # TODO Make sure text does not get scaled too extrememely (50%-150% ?)
-
-        img = img.convert("RGBA")
+        # img = util.add_alpha_channel(img)
 
         word_rand_folder = random.choice(self.word_image_folder_list)
         word_image_name = random.choice(os.listdir(word_rand_folder))
         word_full_path = word_rand_folder + word_image_name
 
-        word = Image.open(word_full_path)
-        word_height = word.size[1]
+        word = cv2.imread(word_full_path)
+        word_height = word.shape[0]
+        word_width = word.shape[1]
 
         avg_word_scale_factor = min(avg_line_height / word_height, 1.0)
 
@@ -261,42 +251,51 @@ class Document:
             word_image_name = random.choice(os.listdir(word_rand_folder))
             word_full_path = word_rand_folder + word_image_name
 
-            word = Image.open(word_full_path)
-            word = word.convert("RGBA")
-            word = word.filter(ImageFilter.GaussianBlur(2))
+            word = cv2.imread(word_full_path)
+            word = util.apply_blur_edges(word, 5, 3)
+            word = util.add_alpha_channel(word)
 
-            new_word_width = int(np.rint(word.size[0] * avg_word_scale_factor))
-            new_word_height = int(np.rint(word.size[1] * avg_word_scale_factor))
+            word_height = word.shape[0]
+            word_width = word.shape[1]
+
+            if word.shape[0] == 0 or word.shape[1] == 1:
+                continue
+
+            new_word_width = int(np.rint(word.shape[1] * avg_word_scale_factor))
+            new_word_height = int(np.rint(word.shape[0] * avg_word_scale_factor))
 
             if x_offset + new_word_width > int(np.rint(text_end_position[1] * background_width)):
-                if y_offset + new_word_height > int(np.rint(text_end_position[0] * background_height)):
+                if y_offset + new_word_height + new_word_height > int(np.rint(text_end_position[0] * background_height)):
                     break
 
                 x_offset = int(np.rint(text_start_position[0] * background_width))
-                y_offset += int(avg_line_height + (avg_line_height * line_height_variation))
+                # y_offset += int(avg_line_height + (avg_line_height * line_height_variation))
+                y_offset += new_word_height
 
-            word = word.resize((new_word_width, new_word_height), Image.BICUBIC)
 
-            word = np.asarray(word).copy()
-            ground_truth_word = np.asarray(word).copy()
+            word = cv2.resize(word, (new_word_width, new_word_height), cv2.INTER_CUBIC)
 
             color += np.random.randint(-2, 3, size=3)
-            self.white_to_alpha(word, color=color)
-            self.white_to_alpha(ground_truth_word)
+            util.white_to_alpha(word, color=color)
 
-            word = Image.fromarray(word)
-            ground_truth_word = Image.fromarray(ground_truth_word)
+            word = cv2.copyMakeBorder(word,
+                                      y_offset,
+                                      background_height - y_offset - new_word_height,
+                                      x_offset,
+                                      background_width - x_offset - new_word_width,
+                                      cv2.BORDER_CONSTANT,
+                                      (0, 0, 0, 0))
 
-            word = word.crop((-x_offset, -y_offset, background_width - x_offset, background_height - y_offset))
-            ground_truth_word = ground_truth_word.crop((-x_offset, -y_offset, background_width - x_offset, background_height - y_offset))
+            ground_truth_word = word.copy()
 
-            img = Image.alpha_composite(img, word)
-            ground_truth.paste(ground_truth_word, mask=ground_truth_word)  # = Image.alpha_composite(ground_truth, ground_truth_word)
+            img = util.alpha_composite(img, word)
+            ground_truth = util.alpha_composite(ground_truth, ground_truth_word)
+            # ground_truth.paste(ground_truth_word, mask=ground_truth_word)  # = Image.alpha_composite(ground_truth, ground_truth_word)
 
             x_offset += new_word_width + space_between_words
 
         self.result_ground_truth = TMP_DIR + str(self.random_seed) + "_gt.png"
-        ground_truth.save(self.result_ground_truth)
+        cv2.imwrite(self.result_ground_truth, ground_truth)
 
         return img
 
