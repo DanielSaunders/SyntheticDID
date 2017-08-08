@@ -75,7 +75,9 @@ def generate_single_image(fn_args):
 
     except Exception as exception:
         print(document.random_seed)
-        raise exception
+
+        with open("errors.txt", "a+") as errors:
+            errors.write("{}\n".format(document.random_seed))
 
 
 def main():

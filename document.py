@@ -252,7 +252,6 @@ class Document:
             word_full_path = word_rand_folder + word_image_name
 
             word = cv2.imread(word_full_path)
-            word = util.apply_blur_edges(word, 5, 3)
             word = util.add_alpha_channel(word)
 
             word_height = word.shape[0]
@@ -265,13 +264,12 @@ class Document:
             new_word_height = int(np.rint(word.shape[0] * avg_word_scale_factor))
 
             if x_offset + new_word_width > int(np.rint(text_end_position[1] * background_width)):
-                if y_offset + new_word_height + new_word_height > int(np.rint(text_end_position[0] * background_height)):
+                if y_offset + word_height + new_word_height > int(np.rint(text_end_position[0] * background_height)):
                     break
 
                 x_offset = int(np.rint(text_start_position[0] * background_width))
                 # y_offset += int(avg_line_height + (avg_line_height * line_height_variation))
                 y_offset += new_word_height
-
 
             word = cv2.resize(word, (new_word_width, new_word_height), cv2.INTER_CUBIC)
 
