@@ -17,7 +17,7 @@ from multiprocessing import Pool
 
 GRAYSCALE = True
 
-ORIGINAL_DIR = "/data/synthetic_trial_results/"
+ORIGINAL_DIR = "/data/synthetic_trial_69521/"
 RESULTS_DIR = "/data/synthetic_trial_final/"
 GARBAGE_DIR = "/data/garbage/"
 
@@ -74,7 +74,6 @@ def convert(args):
         gt = gt[top_left_y:bottom_right_y, top_left_y:bottom_right_y]
         gt = gt[:,:,1]
         gt = np.clip(gt, 0, 1)
-        gt = 1 - gt
 
         edges = cv2.Canny(original, 100, 200)
 

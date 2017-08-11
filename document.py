@@ -19,6 +19,7 @@ from lxml import etree
 HANDWRITTEN_WORDS_DIR = "/data/synthetic/handwriting/iamdb/"
 BACKGROUND_IMAGES_DIR = "/data/synthetic/backgrounds/"
 STAIN_IMAGES_DIR = "/data/synthetic/spots/"
+DEFAULT_OUTPUT_DIR = "/data/"
 
 # /dev/shm should be mounted in RAM - allowing for fast IPC (Used as a
 # consequence of using DivaDID.)
@@ -34,7 +35,8 @@ class Document:
     allow for the saving of the generated images to disk.
     """
 
-    def __init__(self, stain_level=1, noise_level=1, seed=None):
+    def __init__(self, stain_level=1, noise_level=1,
+                 seed=None, output_loc=DEFAULT_OUTPUT_DIR):
         """
         Initialize a new Document
 
@@ -52,12 +54,13 @@ class Document:
         self.result = None
         self.result_ground_truth = None
 
+        self.output_dir = output_loc
+        print(self.output_dir)
+
         if seed is not None:
             self.random_seed = seed
         else:
-            # Make sure seed is set, in case multiple proccesses/threads
-            random.seed()
-            self.random_seed = random.randint(10000, 100000)
+            self.assign_random_seed()
 
         random.seed(self.random_seed)
         np.random.seed(self.random_seed)
@@ -65,6 +68,27 @@ class Document:
         print("DEBUG: Using seed {}".format(self.random_seed))
 
         self.gather_data_sources()
+
+    def assign_random_seed(self):
+        tries = 0
+        condition = True
+
+        random.seed()
+
+        # This roughly emulates a do-while loop. We need to assign a seed at
+        # least once.
+        while condition:
+            if tries > 10:
+                raise RuntimeError("Could not find an unused seed")
+
+            self.random_seed = random.randint(10000, 10020)
+
+            file = "img_{}.png".format(self.random_seed)
+            file = self.output_dir + '/' + file
+
+            condition = os.path.isfile(file)
+
+            tries += 1
 
     def gather_data_sources(self):
         """ Parse lists of needed directories. """
@@ -152,7 +176,7 @@ class Document:
         os.remove(second_xml)
         os.remove(first_image)
 
-    def save(self, base_dir=None, file=None):
+    def save(self, file=None):
         """
         Save the generated document to the passed location.
 
@@ -170,21 +194,20 @@ class Document:
         if file is None:
             file = "img_{}.png".format(self.random_seed)
 
-        if isinstance(base_dir, str):
-            file = base_dir + '/' + file
+        file = self.output_dir + '/' + file
 
-            try:
-                os.makedirs(base_dir)
-            except OSError as exception:
-                if exception.errno != errno.EEXIST:
-                    raise
+        try:
+            os.makedirs(self.output_dir)
+        except OSError as exception:
+            if exception.errno != errno.EEXIST:
+                raise
 
         print("File saved to {}".format(file))
         shutil.copy2(self.result, file)
 
         os.remove(self.result)
 
-    def save_ground_truth(self, base_dir=None, file=None):
+    def save_ground_truth(self, file=None):
         """
         Save the generated document to the passed location.
 
@@ -202,8 +225,13 @@ class Document:
         if file is None:
             file = "img_{}_gt.png".format(self.random_seed)
 
-        if isinstance(base_dir, str):
-            file = base_dir + '/' + file
+        file = self.output_dir + '/' + file
+
+        try:
+            os.makedirs(self.output_dir)
+        except OSError as exception:
+            if exception.errno != errno.EEXIST:
+                raise
 
         print("File saved to {}".format(file))
         shutil.copy2(self.result_ground_truth, file)
@@ -292,7 +320,11 @@ class Document:
 
             x_offset += new_word_width + space_between_words
 
+        ground_truth = cv2.cvtColor(ground_truth, cv2.COLOR_BGR2GRAY)
+        retval, ground_truth = cv2.threshold(ground_truth, 20, 255, cv2.THRESH_BINARY_INV)
+
         self.result_ground_truth = TMP_DIR + str(self.random_seed) + "_gt.png"
+
         cv2.imwrite(self.result_ground_truth, ground_truth)
 
         return img

@@ -15,6 +15,7 @@ import random
 import sys
 from multiprocessing import Pool
 from document import Document
+import cv2
 
 # Check to make sure that we are using Python 3
 if sys.version_info < (3, 0):
@@ -67,18 +68,22 @@ def generate_single_image(fn_args):
     # 99585
     try:
         document = Document(fn_args['args'].stain_level,
-                            fn_args['args'].text_noise_level)
+                            fn_args['args'].text_noise_level,
+                            output_loc=fn_args['args'].output_dir)
+
 
         document.create(bypass=fn_args['args'].bypass_divadid)
-        document.save(base_dir=fn_args['args'].output_dir)
-        document.save_ground_truth(base_dir=fn_args['args'].output_dir)
+        document.save()
+        document.save_ground_truth()
 
-    except Exception as exception:
+    except cv2.error as exception:
         print(document.random_seed)
+        print(type(exception))
+        print(exception.args)
+        print(exception.args)
 
         with open("errors.txt", "a+") as errors:
             errors.write("{}\n".format(document.random_seed))
-
 
 def main():
     """
