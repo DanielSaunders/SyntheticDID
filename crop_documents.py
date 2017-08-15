@@ -1,24 +1,27 @@
 #!/usr/bin/env python3
+import argparse
+import errno
+import io
 import os
 import random
-import argparse
-import numpy as np
-import errno
 import shutil
-import lmdb
-import caffe.proto.caffe_pb2
-import traceback
 import sys
-import io
-import matplotlib.pyplot as plt
+import traceback
 
+import caffe.proto.caffe_pb2
 import cv2
+import lmdb
+import matplotlib.pyplot as plt
+import numpy as np
 from multiprocessing import Pool
+
+if os.geteuid == 0:
+    sys.exit("Please do not run as root")
 
 GRAYSCALE = True
 
-ORIGINAL_DIR = "/data/synthetic_trial_69521/"
-RESULTS_DIR = "/data/synthetic_trial_final/"
+ORIGINAL_DIR = "/PLEASECHANGEME"
+RESULTS_DIR = "/PLEASECHAGEME"
 GARBAGE_DIR = "/data/garbage/"
 
 FULL_DIR = RESULTS_DIR + "full/"
@@ -37,6 +40,8 @@ GT_SUBDIR = "processed_gt/"
 RECALL_SUBDIR = "recall_weights/"
 PRECISION_SUBDIR = "precision_weights/"
 
+NUM_SAMPLES_PERIMAGE = 5
+
 random.seed('hello')
 
 def debug_print(string):
@@ -53,61 +58,65 @@ def convert(args):
     file = ORIGINAL_DIR + file
     gt_file = file[:-4] + "_gt" + file[-4:]
 
-    original = cv2.imread(file)
-    gt = cv2.imread(gt_file)
+    base_original = cv2.imread(file)
+    base_gt = cv2.imread(gt_file)
 
-    if original.shape[0] < 256 or original.shape[1] < 256:
+    if base_original.shape[0] < 256 or base_original.shape[1] < 256:
         return
 
     print("Croppping and prepping {} {}".format(file, original.shape))
 
-    for x in range(5):
-        top_left_x = random.randint(0, original.shape[0] - 256)
-        top_left_y = random.randint(0, original.shape[1] - 256)
-        bottom_right_x = top_left_x + 256
-        bottom_right_y = top_left_y + 256
+    for iter in range(NUM_SAMPLES_PERIMAGE):
+        original = base_original.copy()
+        gt = base_gt.copy()
 
-        old_original = original.copy()
-        old_gt = gt.copy()
+        for x in range(5):
+            top_left_x = random.randint(0, original.shape[0] - 256)
+            top_left_y = random.randint(0, original.shape[1] - 256)
+            bottom_right_x = top_left_x + 256
+            bottom_right_y = top_left_y + 256
 
-        original = original[top_left_y:bottom_right_y, top_left_y:bottom_right_y]
-        gt = gt[top_left_y:bottom_right_y, top_left_y:bottom_right_y]
-        gt = gt[:,:,1]
-        gt = np.clip(gt, 0, 1)
+            old_original = original.copy()
+            old_gt = gt.copy()
 
-        edges = cv2.Canny(original, 100, 200)
+            original = original[top_left_y:bottom_right_y, top_left_y:bottom_right_y]
+            gt = gt[top_left_y:bottom_right_y, top_left_y:bottom_right_y]
+            gt = gt[:,:,1]
+            gt = np.clip(gt, 0, 1)
 
-        pixel_count = cv2.countNonZero(edges)
+            edges = cv2.Canny(original, 100, 200)
 
-        if pixel_count > 0.01 * original.shape[0] * original.shape[1]:
-            break
-        elif x == 4:
-            file = GARBAGE_DIR + os.path.basename(file)
-            gt_file = GARBAGE_DIR + os.path.basename(gt_file)
+            pixel_count = cv2.countNonZero(edges)
+
+            if pixel_count > 0.01 * original.shape[0] * original.shape[1]:
+                break
+            elif x == 4:
+                file = GARBAGE_DIR + os.path.basename(file)
+                gt_file = GARBAGE_DIR + os.path.basename(gt_file)
 
 
-            cv2.imwrite(file, original)
-            cv2.imwrite(gt_file, gt)
-            return
+                cv2.imwrite(file, original)
+                cv2.imwrite(gt_file, gt)
+                return
 
-        original = old_original
-        gt = old_gt
+            original = old_original
+            gt = old_gt
 
-    file = FULL_DIR + ORIGINAL_SUBDIR + os.path.basename(file)
-    gt_file = FULL_DIR + GT_SUBDIR + os.path.basename(file)
-    recall_file = FULL_DIR + RECALL_SUBDIR + os.path.basename(file)
-    precision_file = FULL_DIR + PRECISION_SUBDIR + os.path.basename(file)
+        file = FULL_DIR + ORIGINAL_SUBDIR + os.path.basename(file)
+        gt_file = FULL_DIR + GT_SUBDIR + os.path.basename(file)
+        recall_file = FULL_DIR + RECALL_SUBDIR + os.path.basename(file)
+        precision_file = FULL_DIR + PRECISION_SUBDIR + os.path.basename(file)
 
-    weighted_image = 128 * np.ones_like(original)
-    weighted_image = weighted_image[:,:,1]
+        weighted_image = 128 * np.ones_like(original)
+        weighted_image = weighted_image[:,:,1]
 
-    if grayscale == True:
-        original = cv2.cvtColor(original, cv2.COLOR_BGR2GRAY)
+        if grayscale == True:
+            original = cv2.cvtColor(original, cv2.COLOR_BGR2GRAY)
 
-    cv2.imwrite(file, original)
-    cv2.imwrite(gt_file, gt)
-    cv2.imwrite(recall_file, weighted_image)
-    cv2.imwrite(precision_file, weighted_image)
+        cv2.imwrite(file, original)
+        cv2.imwrite(gt_file, gt)
+        cv2.imwrite(recall_file, weighted_image)
+        cv2.imwrite(precision_file, weighted_image)
 
 def split_into_sets():
 
