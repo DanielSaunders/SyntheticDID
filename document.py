@@ -81,7 +81,7 @@ class Document:
             if tries > 10:
                 raise RuntimeError("Could not find an unused seed")
 
-            self.random_seed = random.randint(10000, 10020)
+            self.random_seed = random.randint(10000, 100000)
 
             file = "img_{}.png".format(self.random_seed)
             file = self.output_dir + '/' + file

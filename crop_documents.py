@@ -82,6 +82,7 @@ def convert(args):
             original = original[top_left_y:bottom_right_y, top_left_y:bottom_right_y]
             gt = gt[top_left_y:bottom_right_y, top_left_y:bottom_right_y]
             gt = gt[:,:,1]
+            gt = gt.squeeze()
             gt = np.clip(gt, 0, 1)
 
             edges = cv2.Canny(original, 100, 200)
@@ -109,6 +110,7 @@ def convert(args):
 
         weighted_image = 128 * np.ones_like(original)
         weighted_image = weighted_image[:,:,1]
+        weighted_image = weighted_image.squeeze()
 
         if grayscale == True:
             original = cv2.cvtColor(original, cv2.COLOR_BGR2GRAY)
