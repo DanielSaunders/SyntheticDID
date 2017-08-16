@@ -48,6 +48,10 @@ def debug_print(string):
     if __debug__:
         print("DEBUG: {}".format(string))
 
+def insert_value(orig, value):
+    return orig[:-4] + "_" + value + orig[-4:]
+
+
 def convert(args):
     file = args[0]
     grayscale = args[1]
@@ -64,7 +68,7 @@ def convert(args):
     if base_original.shape[0] < 256 or base_original.shape[1] < 256:
         return
 
-    print("Croppping and prepping {} {}".format(file, original.shape))
+    print("Croppping and prepping {} {}".format(file, base_original.shape))
 
     for iter in range(NUM_SAMPLES_PERIMAGE):
         original = base_original.copy()
@@ -115,10 +119,10 @@ def convert(args):
         if grayscale == True:
             original = cv2.cvtColor(original, cv2.COLOR_BGR2GRAY)
 
-        cv2.imwrite(file, original)
-        cv2.imwrite(gt_file, gt)
-        cv2.imwrite(recall_file, weighted_image)
-        cv2.imwrite(precision_file, weighted_image)
+        cv2.imwrite(insert_value(file, iter), original)
+        cv2.imwrite(insert_value(gt_file, iter), gt)
+        cv2.imwrite(insert_value(recall_file, iter), weighted_image)
+        cv2.imwrite(insert_value(precision_file, iter), weighted_image)
 
 def split_into_sets():
 
