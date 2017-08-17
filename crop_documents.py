@@ -247,6 +247,25 @@ def create_lmdb(images, db_file):
     env.close()
 
 
+def set_up_lmdbs(dir):
+    dir = args[0]
+    subdir = args[1]
+
+    # Strip off last slash
+    type_name = subdir[:-1]
+
+    lmdb_folder = "{}{}{}_{}_lmdb".format(LMDB_DIR, subdir, type_name, dir)
+
+    try:
+        debug_print("Creating folder: {}".format(lmdb_folder))
+        os.makedirs(lmdb_folder)
+    except OSError as e:
+        if e.errno != errno.EEXIST:
+            raise
+
+    create_lmdb(RESULTS_DIR + dir + "/" + subdir, lmdb_folder)
+
+
 
 # parser = argparse.ArgumentParser(description="Prepare generated images for training")
 # parser.add_argument('data_dir', help="the directory in which the base images reside")
@@ -292,19 +311,10 @@ split_into_sets()
 # STEP 3 - Generate needed lmdb's
 print("-- Starting STEP 3 --")
 
+lmbdb_dirs = []
 for dir in [ "train", "val", "test" ]:
     for subdir in [ ORIGINAL_SUBDIR, GT_SUBDIR, RECALL_SUBDIR, PRECISION_SUBDIR ]:
-        # Strip off last slash
-        type_name = subdir[:-1]
+        lmdb_dirs.append((dir, subdir))
 
-        lmdb_folder = "{}{}{}_{}_lmdb".format(LMDB_DIR, subdir, type_name, dir)
-
-        try:
-            debug_print("Creating folder: {}".format(lmdb_folder))
-            os.makedirs(lmdb_folder)
-        except OSError as e:
-            if e.errno != errno.EEXIST:
-                raise
-
-        create_lmdb(RESULTS_DIR + dir + "/" + subdir, lmdb_folder)
+pool.map(set_up_lmdbs, lmdb_dirs)
 
