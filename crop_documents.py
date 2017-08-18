@@ -116,12 +116,14 @@ def convert(args):
         recall_file = FULL_DIR + RECALL_SUBDIR + os.path.basename(file)
         precision_file = FULL_DIR + PRECISION_SUBDIR + os.path.basename(file)
 
-        weighted_image = 128 * np.ones_like(original)
-        weighted_image = weighted_image[:,:,1]
-        weighted_image = weighted_image.squeeze()
-
         if grayscale == True:
             original = cv2.cvtColor(original, cv2.COLOR_BGR2GRAY)
+
+        weighted_image = 128 * np.ones_like(original)
+        weighted_image = weighted_image[:,:,1]
+
+        if original is None or gt is None or weighted_image is None:
+            return
 
         cv2.imwrite(insert_value(file, iter), original)
         cv2.imwrite(insert_value(gt_file, iter), gt)
