@@ -20,9 +20,12 @@ if os.geteuid == 0:
 
 GRAYSCALE = True
 
-ORIGINAL_DIR = "/PLEASECHANGEME"
-RESULTS_DIR = "/PLEASECHAGEME"
-GARBAGE_DIR = "/data/garbage/"
+DESTINATION = None
+DESTINATION_ROOT = None
+
+ORIGINAL_DIR = None
+RESULTS_DIR = None
+GARBAGE_DIR = None
 
 FULL_DIR = RESULTS_DIR + "full/"
 
@@ -87,6 +90,7 @@ def convert(args):
             gt = gt[top_left_y:bottom_right_y, top_left_y:bottom_right_y]
             gt = gt[:,:,1]
             gt = gt.squeeze()
+            gt = cv2.cvtColor(gt, cv2.COLOR_BGR2GRAY)
             gt = np.clip(gt, 0, 1)
 
             edges = cv2.Canny(original, 100, 200)
@@ -95,7 +99,7 @@ def convert(args):
 
             if pixel_count > 0.01 * original.shape[0] * original.shape[1]:
                 break
-            elif x == 4:
+            elif x == 4 and GARBAGE_DIR is not None:
                 file = GARBAGE_DIR + os.path.basename(file)
                 gt_file = GARBAGE_DIR + os.path.basename(gt_file)
 
@@ -247,7 +251,7 @@ def create_lmdb(images, db_file):
     env.close()
 
 
-def set_up_lmdbs(dir):
+def set_up_lmdbs(args):
     dir = args[0]
     subdir = args[1]
 
@@ -264,6 +268,9 @@ def set_up_lmdbs(dir):
             raise
 
     create_lmdb(RESULTS_DIR + dir + "/" + subdir, lmdb_folder)
+
+def move_image_to_dest(src_file):
+    shutil.copy2(src_file, DESTINATION_ROOT + '/data/' + DESTINATION + '/original_images/')
 
 
 
@@ -311,10 +318,30 @@ split_into_sets()
 # STEP 3 - Generate needed lmdb's
 print("-- Starting STEP 3 --")
 
-lmbdb_dirs = []
+lmdb_dirs = []
 for dir in [ "train", "val", "test" ]:
     for subdir in [ ORIGINAL_SUBDIR, GT_SUBDIR, RECALL_SUBDIR, PRECISION_SUBDIR ]:
         lmdb_dirs.append((dir, subdir))
 
 pool.map(set_up_lmdbs, lmdb_dirs)
+
+# STEP 4 - Copy files to needed locations - Optional
+print("-- Starting STEP 4 --")
+if DESTINATION is not None:
+    pool.map(move_image_to_dest, os.listdir(TRAIN_DIR + ORIGINAL_SUBDIR))
+    pool.map(move_image_to_dest, os.listdir(TEST_DIR + ORIGINAL_SUBDIR))
+    pool.map(move_image_to_dest, os.listdir(VAL_DIR + ORIGINAL_SUBDIR))
+
+    for dir in [ "train", "val", "test" ]:
+        for subdir in [ ORIGINAL_SUBDIR, GT_SUBDIR, RECALL_SUBDIR, PRECISION_SUBDIR ]:
+            shutil.copy2(
+                LMDB_DIR + dir + "/" + subdir + "data.mdb",
+                DESTINATION_ROOT + "/compute/lmdb/256" + DESTINATION + ORIGINAL_SUBDIR + ORIGINAL_SUBDIR[:-1] + "_" + dir + "_lmdb/")
+
+            shutil.copy2(
+                LMDB_DIR + dir + "/" + subdir + "lock.mdb",
+                DESTINATION_ROOT + "/compute/lmdb/256" + DESTINATION + ORIGINAL_SUBDIR + ORIGINAL_SUBDIR[:-1] + "_" + dir + "_lmdb/")
+
+    for dir in [ "train.txt", "val.txt", "test.txt" ]:
+        shutil.copy2(LABELS_DIR + dir, DESTINATION_ROOT + "/data/" + DESTINATION + "/labels/")
 
