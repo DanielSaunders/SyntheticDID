@@ -336,6 +336,14 @@ pool.map(set_up_lmdbs, lmdb_dirs)
 # STEP 4 - Copy files to needed locations - Optional
 print("-- Starting STEP 4 --")
 if DESTINATION is not None:
+    dest_dir = DESTINATION_ROOT + '/data/' + DESTINATION + '/original_images/'
+
+    try:
+        os.makedirs(dest_dir)
+    except OSError, e:
+        if e.errno != errno.EEXIST:
+            raise
+
     pool.map(move_image_to_dest, [TRAIN_DIR + ORIGINAL_SUBDIR + x for x in os.listdir(TRAIN_DIR + ORIGINAL_SUBDIR)])
     pool.map(move_image_to_dest, [TEST_DIR + ORIGINAL_SUBDIR + x for x in os.listdir(TEST_DIR + ORIGINAL_SUBDIR)])
     pool.map(move_image_to_dest, [VAL_DIR + ORIGINAL_SUBDIR + x for x in os.listdir(VAL_DIR + ORIGINAL_SUBDIR)])
@@ -359,5 +367,13 @@ if DESTINATION is not None:
                 dest_dir)
 
     for dir in [ "train.txt", "val.txt", "test.txt" ]:
-        shutil.copy2(LABELS_DIR + dir, DESTINATION_ROOT + "/data/" + DESTINATION + "/labels/")
+        dest_dir =  DESTINATION_ROOT + "/data/" + DESTINATION + "/labels/"
+
+        try:
+            os.makedirs(dest_dir)
+        except OSError, e:
+            if e.errno != errno.EEXIST:
+                raise
+
+        shutil.copy2(LABELS_DIR + dir, dest_dir)
 
