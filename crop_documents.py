@@ -52,83 +52,88 @@ def debug_print(string):
         print("DEBUG: {}".format(string))
 
 def insert_value(orig, value):
-    return orig[:-4] + "_" + value + orig[-4:]
+    return orig[:-4] + "_" + str(value) + orig[-4:]
 
 
 def convert(args):
-    file = args[0]
-    grayscale = args[1]
+    try:
+        file = args[0]
+        grayscale = args[1]
 
-    if "gt" in file:
-        return
-
-    file = ORIGINAL_DIR + file
-    gt_file = file[:-4] + "_gt" + file[-4:]
-
-    base_original = cv2.imread(file)
-    base_gt = cv2.imread(gt_file)
-
-    if base_original.shape[0] < 256 or base_original.shape[1] < 256:
-        return
-
-    print("Croppping and prepping {} {}".format(file, base_original.shape))
-
-    for iter in range(NUM_SAMPLES_PERIMAGE):
-        original = base_original.copy()
-        gt = base_gt.copy()
-
-        for x in range(5):
-            top_left_x = random.randint(0, original.shape[0] - 256)
-            top_left_y = random.randint(0, original.shape[1] - 256)
-            bottom_right_x = top_left_x + 256
-            bottom_right_y = top_left_y + 256
-
-            old_original = original.copy()
-            old_gt = gt.copy()
-
-            original = original[top_left_y:bottom_right_y, top_left_y:bottom_right_y]
-            gt = gt[top_left_y:bottom_right_y, top_left_y:bottom_right_y]
-            gt = gt[:,:,1]
-            gt = gt.squeeze()
-            gt = cv2.cvtColor(gt, cv2.COLOR_BGR2GRAY)
-            gt = np.clip(gt, 0, 1)
-
-            edges = cv2.Canny(original, 100, 200)
-
-            pixel_count = cv2.countNonZero(edges)
-
-            if pixel_count > 0.01 * original.shape[0] * original.shape[1]:
-                break
-            elif x == 4 and GARBAGE_DIR is not None:
-                file = GARBAGE_DIR + os.path.basename(file)
-                gt_file = GARBAGE_DIR + os.path.basename(gt_file)
-
-
-                cv2.imwrite(file, original)
-                cv2.imwrite(gt_file, gt)
-                return
-
-            original = old_original
-            gt = old_gt
-
-        file = FULL_DIR + ORIGINAL_SUBDIR + os.path.basename(file)
-        gt_file = FULL_DIR + GT_SUBDIR + os.path.basename(file)
-        recall_file = FULL_DIR + RECALL_SUBDIR + os.path.basename(file)
-        precision_file = FULL_DIR + PRECISION_SUBDIR + os.path.basename(file)
-
-        if grayscale == True:
-            original = cv2.cvtColor(original, cv2.COLOR_BGR2GRAY)
-
-        weighted_image = 128 * np.ones_like(original)
-        weighted_image = weighted_image[:,:,1]
-
-        if original is None or gt is None or weighted_image is None:
+        if "gt" in file:
             return
 
-        cv2.imwrite(insert_value(file, iter), original)
-        cv2.imwrite(insert_value(gt_file, iter), gt)
-        cv2.imwrite(insert_value(recall_file, iter), weighted_image)
-        cv2.imwrite(insert_value(precision_file, iter), weighted_image)
+        file = ORIGINAL_DIR + file
+        gt_file = file[:-4] + "_gt" + file[-4:]
+
+        base_original = cv2.imread(file)
+        base_gt = cv2.imread(gt_file)
+
+        if base_original.shape[0] < 256 or base_original.shape[1] < 256:
+            return
+
+        print("Croppping and prepping {} {}".format(file, base_original.shape))
+
+        for iter in range(NUM_SAMPLES_PERIMAGE):
+            original = base_original.copy()
+            gt = base_gt.copy()
+
+            for x in range(5):
+                top_left_x = random.randint(0, original.shape[0] - 256)
+                top_left_y = random.randint(0, original.shape[1] - 256)
+                bottom_right_x = top_left_x + 256
+                bottom_right_y = top_left_y + 256
+
+                old_original = original.copy()
+                old_gt = gt.copy()
+
+                original = original[top_left_y:bottom_right_y, top_left_y:bottom_right_y]
+                gt = gt[top_left_y:bottom_right_y, top_left_y:bottom_right_y]
+                gt = cv2.cvtColor(gt, cv2.COLOR_BGR2GRAY)
+                gt = np.clip(gt, 0, 1)
+
+                edges = cv2.Canny(original, 100, 200)
+
+                pixel_count = cv2.countNonZero(edges)
+
+                if pixel_count > 0.01 * original.shape[0] * original.shape[1]:
+                    break
+                elif x == 4 and GARBAGE_DIR is not None:
+                    file = GARBAGE_DIR + os.path.basename(file)
+                    gt_file = GARBAGE_DIR + os.path.basename(gt_file)
+
+
+                    cv2.imwrite(file, original)
+                    cv2.imwrite(gt_file, gt)
+                    return
+
+                original = old_original
+                gt = old_gt
+
+            file = FULL_DIR + ORIGINAL_SUBDIR + os.path.basename(file)
+            gt_file = FULL_DIR + GT_SUBDIR + os.path.basename(file)
+            recall_file = FULL_DIR + RECALL_SUBDIR + os.path.basename(file)
+            precision_file = FULL_DIR + PRECISION_SUBDIR + os.path.basename(file)
+
+            # TODO: Why are some grayscale?
+            if grayscale == True and len(original.shape) == 3:
+                original = cv2.cvtColor(original, cv2.COLOR_BGR2GRAY)
+
+            weighted_image = 128 * np.ones_like(original)
+
+            if original is None or gt is None or weighted_image is None:
+                return
+
+            if original.shape != (256, 256) or gt.shape != (256, 256) or weighted_image.shape != (256, 256):
+                return
+
+            cv2.imwrite(insert_value(file, iter), original)
+            cv2.imwrite(insert_value(gt_file, iter), gt)
+            cv2.imwrite(insert_value(recall_file, iter), weighted_image)
+            cv2.imwrite(insert_value(precision_file, iter), weighted_image)
+    except Exception:
+        traceback.print_exc()
+        raise
 
 def split_into_sets():
 
@@ -288,6 +293,7 @@ def move_image_to_dest(src_file):
 print("Source Dir: {}".format(ORIGINAL_DIR))
 print("Results Dir: {}".format(RESULTS_DIR))
 
+print("Cleaning destination folder")
 shutil.rmtree(RESULTS_DIR)
 
 # STEP 0 - Make sure needed directories all exist
@@ -330,19 +336,27 @@ pool.map(set_up_lmdbs, lmdb_dirs)
 # STEP 4 - Copy files to needed locations - Optional
 print("-- Starting STEP 4 --")
 if DESTINATION is not None:
-    pool.map(move_image_to_dest, os.listdir(TRAIN_DIR + ORIGINAL_SUBDIR))
-    pool.map(move_image_to_dest, os.listdir(TEST_DIR + ORIGINAL_SUBDIR))
-    pool.map(move_image_to_dest, os.listdir(VAL_DIR + ORIGINAL_SUBDIR))
+    pool.map(move_image_to_dest, [TRAIN_DIR + ORIGINAL_SUBDIR + x for x in os.listdir(TRAIN_DIR + ORIGINAL_SUBDIR)])
+    pool.map(move_image_to_dest, [TEST_DIR + ORIGINAL_SUBDIR + x for x in os.listdir(TEST_DIR + ORIGINAL_SUBDIR)])
+    pool.map(move_image_to_dest, [VAL_DIR + ORIGINAL_SUBDIR + x for x in os.listdir(VAL_DIR + ORIGINAL_SUBDIR)])
 
     for dir in [ "train", "val", "test" ]:
         for subdir in [ ORIGINAL_SUBDIR, GT_SUBDIR, RECALL_SUBDIR, PRECISION_SUBDIR ]:
-            shutil.copy2(
-                LMDB_DIR + dir + "/" + subdir + "data.mdb",
-                DESTINATION_ROOT + "/compute/lmdb/256" + DESTINATION + ORIGINAL_SUBDIR + ORIGINAL_SUBDIR[:-1] + "_" + dir + "_lmdb/")
+            dest_dir =  DESTINATION_ROOT + "/compute/lmdb/" + DESTINATION + "256/" + subdir + subdir[:-1] + "_" + dir + "_lmdb/"
+
+            try:
+                os.makedirs(dest_dir)
+            except OSError, e:
+                if e.errno != errno.EEXIST:
+                    raise
 
             shutil.copy2(
-                LMDB_DIR + dir + "/" + subdir + "lock.mdb",
-                DESTINATION_ROOT + "/compute/lmdb/256" + DESTINATION + ORIGINAL_SUBDIR + ORIGINAL_SUBDIR[:-1] + "_" + dir + "_lmdb/")
+                LMDB_DIR + subdir + subdir[:-1] + "_" + dir + "_lmdb/" + "data.mdb",
+                dest_dir)
+
+            shutil.copy2(
+                LMDB_DIR + subdir + subdir[:-1] + "_" + dir + "_lmdb/" + "lock.mdb",
+                dest_dir)
 
     for dir in [ "train.txt", "val.txt", "test.txt" ]:
         shutil.copy2(LABELS_DIR + dir, DESTINATION_ROOT + "/data/" + DESTINATION + "/labels/")
