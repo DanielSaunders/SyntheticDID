@@ -20,8 +20,14 @@ if os.geteuid == 0:
 
 GRAYSCALE = True
 
-DESTINATION = None
+DATA_SET = None
 DESTINATION_ROOT = None
+CREATE_PROJECT = False
+PROJECT_SUB_REV = ""
+PROJECT_SUB_REV_2 = ""
+PROJECT_ITER = ""
+
+SKELETON_DIR = None
 
 ORIGINAL_DIR = None
 RESULTS_DIR = None
@@ -276,8 +282,102 @@ def set_up_lmdbs(args):
 
     create_lmdb(RESULTS_DIR + dir + "/" + subdir, lmdb_folder)
 
+
 def move_image_to_dest(src_file):
-    shutil.copy2(src_file, DESTINATION_ROOT + '/data/' + DESTINATION + '/original_images/')
+    shutil.copy2(src_file, DESTINATION_ROOT + "/data/" + DATA_SET + "/original_images/")
+
+
+def copy_files_to_position():
+    dest_dir = DESTINATION_ROOT + "/data/" + DATA_SET + "/original_images/"
+
+    try:
+        os.makedirs(dest_dir)
+    except OSError, e:
+        if e.errno != errno.EEXIST:
+            raise
+
+    pool.map(move_image_to_dest, [TRAIN_DIR + ORIGINAL_SUBDIR + x for x in os.listdir(TRAIN_DIR + ORIGINAL_SUBDIR)])
+    pool.map(move_image_to_dest, [TEST_DIR + ORIGINAL_SUBDIR + x for x in os.listdir(TEST_DIR + ORIGINAL_SUBDIR)])
+    pool.map(move_image_to_dest, [VAL_DIR + ORIGINAL_SUBDIR + x for x in os.listdir(VAL_DIR + ORIGINAL_SUBDIR)])
+
+    for dir in [ "train", "val", "test" ]:
+        for subdir in [ ORIGINAL_SUBDIR, GT_SUBDIR, RECALL_SUBDIR, PRECISION_SUBDIR ]:
+            dest_dir =  DESTINATION_ROOT + "/compute/lmdb/" + DATA_SET + "256/" + subdir + subdir[:-1] + "_" + dir + "_lmdb/"
+
+            try:
+                os.makedirs(dest_dir)
+            except OSError, e:
+                if e.errno != errno.EEXIST:
+                    raise
+
+            shutil.copy2(
+                LMDB_DIR + subdir + subdir[:-1] + "_" + dir + "_lmdb/" + "data.mdb",
+                dest_dir)
+
+            shutil.copy2(
+                LMDB_DIR + subdir + subdir[:-1] + "_" + dir + "_lmdb/" + "lock.mdb",
+                dest_dir)
+
+    for dir in [ "train.txt", "val.txt", "test.txt" ]:
+        dest_dir =  DESTINATION_ROOT + "/data/" + DATA_SET + "/labels/"
+
+        try:
+            os.makedirs(dest_dir)
+        except OSError, e:
+            if e.errno != errno.EEXIST:
+                raise
+
+        shutil.copy2(LABELS_DIR + dir, dest_dir)
+
+
+def create_project():
+    project_subdir = "{}/{}/{}/{}/".format(
+        DATA_SET
+        PROJECT_SUB_REV,
+        PROJECT_SUB_REV_2,
+        PROJECT_ITER)
+
+    project_subdir = re.sub(r'\/+', '/', project_subdir)
+
+    net_dir = "{}/nets/{}/".format(
+        DESTINATION_ROOT,
+        project_subdir)
+
+    for file in os.listdir(SKELETON_DIR):
+        src = SKELETON_DIR + file
+        dest = net_dir + file
+
+        try:
+            shutil.copytree(src, dest)
+        except OSError, e:
+            if e.errno != errno.EEXIST:
+                raise
+
+    regex_data_set = re.compile(r'DATA_SET')
+    regex_project_dir = re.compile(r'DATA_SET')
+
+    for file in os.listdir(net_dir):
+        if os.path.isdir(net_dir + file):
+            continue
+
+        with open(net_dir + file) as next_file:
+            file_content = next_file.read()
+
+        if file == "solver.prototxt":
+            results = regex_data_set.subn(project_subdir, file_content)
+        else:
+            results = regex_project_dir.subn(DATA_SET, file_content)
+
+        if results[1] > 0:
+            with open(net_dir + file) as next_file:
+                next_file.write(results[0])
+
+    try:
+        os.makedirs(net_dir)
+    except OSError, e:
+        if e.errno != errno.EEXIST:
+            raise
+
 
 
 
@@ -317,10 +417,12 @@ pool = Pool()
 
 # STEP 1 - Resize the original images and generate auxiliary files
 print("-- Starting STEP 1 --")
+
 pool.map(convert, list(map(lambda x: [x, True], os.listdir(ORIGINAL_DIR))))
 
 # STEP 2 - Generate the recall and precision weights
 print("-- Starting STEP 2 --")
+
 split_into_sets()
 
 # STEP 3 - Generate needed lmdb's
@@ -335,45 +437,13 @@ pool.map(set_up_lmdbs, lmdb_dirs)
 
 # STEP 4 - Copy files to needed locations - Optional
 print("-- Starting STEP 4 --")
-if DESTINATION is not None:
-    dest_dir = DESTINATION_ROOT + '/data/' + DESTINATION + '/original_images/'
 
-    try:
-        os.makedirs(dest_dir)
-    except OSError, e:
-        if e.errno != errno.EEXIST:
-            raise
+if DATA_SET is not None:
+    copy_files_to_position()
 
-    pool.map(move_image_to_dest, [TRAIN_DIR + ORIGINAL_SUBDIR + x for x in os.listdir(TRAIN_DIR + ORIGINAL_SUBDIR)])
-    pool.map(move_image_to_dest, [TEST_DIR + ORIGINAL_SUBDIR + x for x in os.listdir(TEST_DIR + ORIGINAL_SUBDIR)])
-    pool.map(move_image_to_dest, [VAL_DIR + ORIGINAL_SUBDIR + x for x in os.listdir(VAL_DIR + ORIGINAL_SUBDIR)])
+# STEP 5 - Set up project folder - Optional
+print("-- Starting STEP 5 --")
 
-    for dir in [ "train", "val", "test" ]:
-        for subdir in [ ORIGINAL_SUBDIR, GT_SUBDIR, RECALL_SUBDIR, PRECISION_SUBDIR ]:
-            dest_dir =  DESTINATION_ROOT + "/compute/lmdb/" + DESTINATION + "256/" + subdir + subdir[:-1] + "_" + dir + "_lmdb/"
-
-            try:
-                os.makedirs(dest_dir)
-            except OSError, e:
-                if e.errno != errno.EEXIST:
-                    raise
-
-            shutil.copy2(
-                LMDB_DIR + subdir + subdir[:-1] + "_" + dir + "_lmdb/" + "data.mdb",
-                dest_dir)
-
-            shutil.copy2(
-                LMDB_DIR + subdir + subdir[:-1] + "_" + dir + "_lmdb/" + "lock.mdb",
-                dest_dir)
-
-    for dir in [ "train.txt", "val.txt", "test.txt" ]:
-        dest_dir =  DESTINATION_ROOT + "/data/" + DESTINATION + "/labels/"
-
-        try:
-            os.makedirs(dest_dir)
-        except OSError, e:
-            if e.errno != errno.EEXIST:
-                raise
-
-        shutil.copy2(LABELS_DIR + dir, dest_dir)
+if CREATE_PROJECT is True and DATA_SET is not None:
+    create_project()
 
