@@ -85,8 +85,8 @@ def convert(args):
             gt = base_gt.copy()
 
             for x in range(5):
-                top_left_x = random.randint(0, original.shape[0] - 256)
-                top_left_y = random.randint(0, original.shape[1] - 256)
+                top_left_x = random.randint(0, original.shape[1] - 256)
+                top_left_y = random.randint(0, original.shape[0] - 256)
                 bottom_right_x = top_left_x + 256
                 bottom_right_y = top_left_y + 256
 
@@ -140,6 +140,19 @@ def convert(args):
     except Exception:
         traceback.print_exc()
         raise
+
+
+def verify_file(file):
+    try:
+        image = cv2.imread(file)
+
+        if image.shape != (256, 256):
+            raise AssertionError("Image {} was invalid".format(file))
+
+    except Exception:
+        print("Removing {}".format(file))
+        shutil.remove(file)
+
 
 def split_into_sets():
 
@@ -419,6 +432,16 @@ pool = Pool()
 print("-- Starting STEP 1 --")
 
 pool.map(convert, list(map(lambda x: [x, True], os.listdir(ORIGINAL_DIR))))
+
+print("-- Starting STEP 1b --")
+
+all_directories = []
+all_directories += os.listdir(FULL_DIR + ORIGINAL_SUBDIR)
+all_directories += os.listdir(FULL_DIR + GT_SUBDIR)
+all_directories += os.listdir(FULL_DIR + RECALL_SUBDIR)
+all_directories += os.listdir(FULL_DIR + PRECISION_SUBDIR)
+
+pool.map(verify_file, all_directories)
 
 # STEP 2 - Generate the recall and precision weights
 print("-- Starting STEP 2 --")

@@ -4,6 +4,7 @@ A synthetic handwritten Document
 This module includes the Document class.
 """
 import errno
+import multiprocessing
 import os
 import random
 import subprocess
@@ -24,6 +25,9 @@ DEFAULT_OUTPUT_DIR = "/data/"
 # /dev/shm should be mounted in RAM - allowing for fast IPC (Used as a
 # consequence of using DivaDID.)
 TMP_DIR = "/dev/shm/"
+
+def dprint(*args, **kwargs):
+    print(str(multiprocessing.current_process()._identity[0]) + ": " + " ".join(map(str, args)), **kwargs)
 
 
 class Document:
@@ -55,7 +59,7 @@ class Document:
         self.result_ground_truth = None
 
         self.output_dir = output_loc
-        print(self.output_dir)
+        dprint("Output_dir: {}".format(self.output_dir))
 
         if seed is not None:
             self.random_seed = seed
@@ -65,7 +69,7 @@ class Document:
         random.seed(self.random_seed)
         np.random.seed(self.random_seed)
 
-        print("DEBUG: Using seed {}".format(self.random_seed))
+        dprint("Using seed {}".format(self.random_seed))
 
         self.gather_data_sources()
 
@@ -132,7 +136,7 @@ class Document:
         bg_full_path = BACKGROUND_IMAGES_DIR + bg_image_name
 
         if bypass is True:
-            print("-{} Adding text to image {} -".format(self.random_seed, bg_full_path))
+            dprint("Adding text to image {}".format(self.random_seed, bg_full_path))
             img = cv2.imread(bg_full_path)
             text_augmented_img = self.add_text(img)
             cv2.imwrite(base_working_dir + str(self.random_seed) + "_augmented.png",
@@ -142,7 +146,7 @@ class Document:
             return
 
         # Generate XML for DivaDID and then degrade background image
-        print("- Generating degraded image - pass 1")
+        dprint("- Generating degraded image - pass 1")
         first_xml, first_image = self.generate_degradation_xml(bg_full_path,
                                                              1,
                                                              True,
@@ -152,7 +156,7 @@ class Document:
                               stdout=subprocess.DEVNULL)
 
         # Add text to degraded background image
-        print("-{} Adding text to image {} -".format(self.random_seed, bg_full_path))
+        dprint("-{} Adding text to image {} -".format(self.random_seed, bg_full_path))
         img = cv2.imread(first_image)
         text_augmented_img = self.add_text(img)
         cv2.imwrite(base_working_dir + str(self.random_seed) + "_augmented.png",
@@ -160,7 +164,7 @@ class Document:
 
 
         # Generate XML for second pass of DivaDID. Degrade image with text
-        print("- Generating degraded image - pass 2")
+        dprint("- Generating degraded image - pass 2")
         second_xml, second_image = self.generate_degradation_xml(
             base_working_dir + str(self.random_seed) + "_augmented.png",
             2,
@@ -187,7 +191,7 @@ class Document:
         """
 
         if self.result is None:
-            print("Trying to save document before it has been generated.",
+            dprint("Trying to save document before it has been generated.",
                   file=sys.stderr)
             return
 
@@ -202,7 +206,7 @@ class Document:
             if exception.errno != errno.EEXIST:
                 raise
 
-        print("File saved to {}".format(file))
+        dprint("File saved to {}".format(file))
         shutil.copy2(self.result, file)
 
         os.remove(self.result)
@@ -218,7 +222,7 @@ class Document:
         """
 
         if self.result is None:
-            print("Trying to save document before it has been generated.",
+            dprint("Trying to save document before it has been generated.",
                   file=sys.stderr)
             return
 
@@ -233,7 +237,7 @@ class Document:
             if exception.errno != errno.EEXIST:
                 raise
 
-        print("File saved to {}".format(file))
+        dprint("File saved to {}".format(file))
         shutil.copy2(self.result_ground_truth, file)
 
     def add_text(self, img):

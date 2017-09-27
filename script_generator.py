@@ -11,6 +11,7 @@ which are the absolute binarized form of the text documents. That means that
 the binarized data is exclusively the text itself, and not other noise.
 """
 import argparse
+import multiprocessing
 import random
 import sys
 from multiprocessing import Pool
@@ -23,6 +24,10 @@ if sys.version_info < (3, 0):
     sys.exit(1)
 
 DEFAULT_DIR = "/data/synthetic_trial_" + str(random.randint(10000, 100000))
+
+
+def dprint(*args, **kwargs):
+    print(str(multiprocessing.current_process()._identity[0]) + ": " + " ".join(map(str, args)), **kwargs)
 
 
 def check_output_count(value):
@@ -63,13 +68,14 @@ def generate_single_image(fn_args):
     Using arguments passed in the command line, generate a single image and
     save it to the given output directory.
     """
-    print("Generating image #{}".format(fn_args['iter'] + 1))
+    dprint("Generating image #{}".format(fn_args['iter'] + 1))
 
     # 99585
     try:
         document = Document(fn_args['args'].stain_level,
                             fn_args['args'].text_noise_level,
-                            output_loc=fn_args['args'].output_dir)
+                            output_loc=fn_args['args'].output_dir,
+                            seed=17045)
 
 
         document.create(bypass=fn_args['args'].bypass_divadid)
@@ -77,10 +83,10 @@ def generate_single_image(fn_args):
         document.save_ground_truth()
 
     except cv2.error as exception:
-        print(document.random_seed)
-        print(type(exception))
-        print(exception.args)
-        print(exception.args)
+        dprint(document.random_seed)
+        dprint(type(exception))
+        dprint(exception.args)
+        dprint(exception.args)
 
         with open("errors.txt", "a+") as errors:
             errors.write("{}\n".format(document.random_seed))
@@ -111,7 +117,7 @@ def main():
                                               args.output_dir))
 
     # generate_single_image({'iter': 0, 'args': args})
-    pool = Pool()
+    pool = Pool(1)
 
     pool.map(generate_single_image,
              list(map(lambda x: {'iter': x, 'args': args},
