@@ -97,6 +97,7 @@ def convert(args):
                 gt = gt[top_left_y:bottom_right_y, top_left_y:bottom_right_y]
                 gt = cv2.cvtColor(gt, cv2.COLOR_BGR2GRAY)
                 gt = np.clip(gt, 0, 1)
+                gt = 1 - gt
 
                 edges = cv2.Canny(original, 100, 200)
 
@@ -296,8 +297,8 @@ def set_up_lmdbs(args):
     create_lmdb(RESULTS_DIR + dir + "/" + subdir, lmdb_folder)
 
 
-def move_image_to_dest(src_file):
-    shutil.copy2(src_file, DESTINATION_ROOT + "/data/" + DATA_SET + "/original_images/")
+def move_image_to_dest(src_file, dest):
+    shutil.copy2(src_file, DESTINATION_ROOT + "/data/" + DATA_SET + dest)
 
 
 def copy_files_to_position():
@@ -309,9 +310,18 @@ def copy_files_to_position():
         if e.errno != errno.EEXIST:
             raise
 
-    pool.map(move_image_to_dest, [TRAIN_DIR + ORIGINAL_SUBDIR + x for x in os.listdir(TRAIN_DIR + ORIGINAL_SUBDIR)])
-    pool.map(move_image_to_dest, [TEST_DIR + ORIGINAL_SUBDIR + x for x in os.listdir(TEST_DIR + ORIGINAL_SUBDIR)])
-    pool.map(move_image_to_dest, [VAL_DIR + ORIGINAL_SUBDIR + x for x in os.listdir(VAL_DIR + ORIGINAL_SUBDIR)])
+    for source, dest in [(ORIGINAL_SUBDIR, "/original_images/"),
+                         (RECALL_SUBDIR, "/recall_weights/"),
+                         (PRECISION_SUBDIR, "/precision_weights/")]:
+        pool.map(move_image_to_dest,
+                 [TRAIN_DIR + source + x for x in os.listdir(TRAIN_DIR + source)],
+                 dest)
+        pool.map(move_image_to_dest,
+                 [TEST_DIR + source + x for x in os.listdir(TEST_DIR + source)],
+                 dest)
+        pool.map(move_image_to_dest,
+                 [VAL_DIR + source + x for x in os.listdir(VAL_DIR + source)],
+                 dest)
 
     for dir in [ "train", "val", "test" ]:
         for subdir in [ ORIGINAL_SUBDIR, GT_SUBDIR, RECALL_SUBDIR, PRECISION_SUBDIR ]:

@@ -17,7 +17,7 @@ DEST="/data/trainB/"
 NUM_SAMPLES_PERIMAGE=10
 
 def insert_value(orig, value):
-    return orig[:-4] + "_" + str(value) + orig[-4:]
+    return orig[:-4] + "_" + str(value) + ".png"
 
 def verify_file(file):
     file = DEST + file
@@ -45,7 +45,7 @@ def update_locations(distance, first, second):
 def convert(file):
     file = SOURCE + file
     print(file)
-    original = cv2.imread(file)
+    original = cv2.imread(file, cv2.IMREAD_GRAYSCALE)
     base_original = original.copy()
 
     if base_original.shape[0] < 256 or base_original.shape[1] < 256:
