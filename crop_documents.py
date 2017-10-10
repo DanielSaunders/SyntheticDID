@@ -295,7 +295,7 @@ def package(im, encoding='png'):
 
 def create_lmdb(images, db_file):
     env, txn = open_db(db_file)
-    for x, imname in enumerate(os.listdir(images)):
+    for x, imname in enumerate(sorted(os.listdir(images))):
         if x and x % 10 == 0:
             print ("Processed {} images".format(x))
         try:
