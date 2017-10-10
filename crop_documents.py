@@ -26,6 +26,7 @@ import errno
 import io
 import os
 import random
+import re
 import shutil
 import sys
 import traceback
@@ -35,10 +36,25 @@ import cv2
 import lmdb
 import matplotlib.pyplot as plt
 import numpy as np
+
+from natsort import natsorted
 from multiprocessing import Pool
+from termcolor import colored
 
 if os.geteuid == 0:
     sys.exit("Please do not run as root")
+
+def get_next_results_folder(base):
+    files = [f for f in os.listdir(base) if re.match(r'results-[0-9]+', f)]
+
+    files = natsorted(files)
+
+    if len(files) == 0:
+        return os.path.join(base, "results-001")
+
+    last_number = int(re.match(r'results-([0-9]+)', files[-1]).group(1))
+
+    return os.path.join(base, "results-{:0>3d}".format(last_number + 1))
 
 GRAYSCALE = True
 
@@ -52,7 +68,7 @@ PROJECT_ITER = ""
 SKELETON_DIR = ""
 
 ORIGINAL_DIR = ""
-RESULTS_DIR = ""
+RESULTS_DIR = get_next_results_folder("/tmp")
 
 FULL_DIR = os.path.join(RESULTS_DIR, "full")
 
@@ -78,10 +94,22 @@ def debug_print(string):
     if __debug__:
         print("DEBUG: {}".format(string))
 
+
 def insert_value(orig, value):
-    orig_with_ext = os.path.splitext(file)
+    orig_with_ext = os.path.splitext(orig)
 
     return orig_with_ext[0] + "_" + str(value) + orig_with_ext[1]
+
+
+def update_locations(distance, first, second):
+    if distance > 256:
+        first += 128
+        second += 128
+    else:
+        first += distance
+        second += distance
+
+    return first, second
 
 
 def convert(args):
@@ -93,67 +121,77 @@ def convert(args):
             return
 
         file = os.path.join(ORIGINAL_DIR, file)
-
         gt_file = insert_value(file, "gt")
 
-        base_original = cv2.imread(file)
-        base_gt = cv2.imread(gt_file)
+        original = cv2.imread(file, cv2.IMREAD_GRAYSCALE)
+        gt = cv2.imread(gt_file, cv2.IMREAD_GRAYSCALE)
+
+        base_original = original.copy()
+        base_gt = gt.copy()
 
         if base_original.shape[0] < 256 or base_original.shape[1] < 256:
+            print(colored("Image is too small", 'red'))
             return
 
-        print("Croppping and prepping {} {}".format(file, base_original.shape))
+        print("Cropping and prepping {} {}".format(file, base_original.shape))
 
-        for iter in range(NUM_SAMPLES_PERIMAGE):
-            original = base_original.copy()
-            gt = base_gt.copy()
+        top_left_x = 0
+        top_left_y = 0
+        bottom_right_x = 256
+        bottom_right_y = 256
+        distance_from_edge = base_original.shape[1] - bottom_right_x
+        distance_from_bottom = base_original.shape[0] - bottom_right_y
 
-            for x in range(5):
-                top_left_x = random.randint(0, original.shape[1] - 256)
-                top_left_y = random.randint(0, original.shape[0] - 256)
-                bottom_right_x = top_left_x + 256
-                bottom_right_y = top_left_y + 256
+        x_block = 0
+        y_block = 0
 
-                old_original = original.copy()
-                old_gt = gt.copy()
+        while distance_from_bottom != 0:
+            while distance_from_edge != 0:
+                base_original = original.copy()
+                base_gt = gt.copy()
 
-                original = original[top_left_y:bottom_right_y, top_left_y:bottom_right_y]
-                gt = gt[top_left_y:bottom_right_y, top_left_y:bottom_right_y]
-                gt = cv2.cvtColor(gt, cv2.COLOR_BGR2GRAY)
-                gt = np.clip(gt, 0, 1)
-                gt = 1 - gt
+                cropped_partition_original = base_original[top_left_y:bottom_right_y, top_left_x:bottom_right_x]
 
-                edges = cv2.Canny(original, 100, 200)
+                cropped_partition_gt = base_gt[top_left_y:bottom_right_y, top_left_x:bottom_right_x]
+                cropped_partition_gt = np.clip(cropped_partition_gt, 0, 1)
+                cropped_partition_gt = 1 - cropped_partition_gt
 
-                pixel_count = cv2.countNonZero(edges)
+                if np.count_nonzero(cropped_partition_gt) > 10:
+                    file = os.path.join(FULL_DIR, ORIGINAL_SUBDIR, os.path.basename(file))
+                    gt_file = os.path.join(FULL_DIR, GT_SUBDIR, os.path.basename(file))
+                    recall_file = os.path.join(FULL_DIR, RECALL_SUBDIR, os.path.basename(file))
+                    precision_file = os.path.join(FULL_DIR, PRECISION_SUBDIR, os.path.basename(file))
 
-                if pixel_count > 0.01 * original.shape[0] * original.shape[1]:
-                    break
+                    weighted_image = 128 * np.ones_like(cropped_partition_original)
 
-                original = old_original
-                gt = old_gt
+                    iter = "{}_{}".format(y_block, x_block)
+                    cv2.imwrite(insert_value(file, iter), cropped_partition_original)
+                    cv2.imwrite(insert_value(gt_file, iter), cropped_partition_gt)
+                    cv2.imwrite(insert_value(recall_file, iter), weighted_image)
+                    cv2.imwrite(insert_value(precision_file, iter), weighted_image)
 
-            file = os.path.join(FULL_DIR, ORIGINAL_SUBDIR, os.path.basename(file))
-            gt_file = os.path.join(FULL_DIR, GT_SUBDIR, os.path.basename(file))
-            recall_file = os.path.join(FULL_DIR, RECALL_SUBDIR, os.path.basename(file))
-            precision_file = os.path.join(FULL_DIR, PRECISION_SUBDIR, os.path.basename(file))
 
-            # TODO: Why are some grayscale?
-            if grayscale == True and len(original.shape) == 3:
-                original = cv2.cvtColor(original, cv2.COLOR_BGR2GRAY)
+                x_block += 1
 
-            weighted_image = 128 * np.ones_like(original)
+                distance_from_edge = base_original.shape[1] - bottom_right_x
 
-            if original is None or gt is None or weighted_image is None:
-                return
+                top_left_x, bottom_right_x = update_locations(distance_from_edge,
+                                                              top_left_x,
+                                                              bottom_right_x)
 
-            if original.shape != (256, 256) or gt.shape != (256, 256) or weighted_image.shape != (256, 256):
-                return
 
-            cv2.imwrite(insert_value(file, iter), original)
-            cv2.imwrite(insert_value(gt_file, iter), gt)
-            cv2.imwrite(insert_value(recall_file, iter), weighted_image)
-            cv2.imwrite(insert_value(precision_file, iter), weighted_image)
+            y_block += 1
+            x_block = 0
+            top_left_x = 0
+            bottom_right_x = 256
+
+            distance_from_bottom = base_original.shape[0] - bottom_right_y
+            distance_from_edge = base_original.shape[1] - bottom_right_x
+
+            top_left_y, bottom_right_y = update_locations(distance_from_bottom,
+                                                          top_left_y,
+                                                          bottom_right_y)
+
     except Exception:
         traceback.print_exc()
         raise
@@ -167,7 +205,7 @@ def verify_file(file):
             raise AssertionError("Image {} was invalid".format(file))
 
     except Exception:
-        print("Removing {}".format(file))
+        debug_print("Removing {}".format(file))
         shutil.remove(file)
 
 
@@ -176,7 +214,7 @@ def split_into_sets():
     # Since there is a 1:1 between the original files and each type of processed
     # image, we can just iterate over the original files and move each corresponding
     # processed image at the same time.
-    files = os.listdir(os.join.path(FULL_DIR, ORIGINAL_SUBDIR))
+    files = os.listdir(os.path.join(FULL_DIR, ORIGINAL_SUBDIR))
 
     sequence = list(range(len(files)))
     random.shuffle(sequence)
@@ -218,7 +256,7 @@ def split_into_sets():
     for dir in [ ("train", TRAIN_DIR), ("test", TEST_DIR), ("val", VAL_DIR) ]:
         with open(os.path.join(LABELS_DIR, dir[0] + ".txt"), 'w') as output:
 
-            for file in os.listdir(os.join.path(dir[1], ORIGINAL_SUBDIR)):
+            for file in os.listdir(os.path.join(dir[1], ORIGINAL_SUBDIR)):
 
                 output.write("./{}\n".format(file))
 
@@ -293,7 +331,7 @@ def set_up_lmdbs(args):
     subdir = args[1]
 
     # Strip off last slash
-    type_name = subdir[:-1]
+    type_name = subdir
 
     lmdb_folder = "{}_{}_lmdb".format( type_name, dir)
     lmdb_folder = os.path.join(LMDB_DIR, subdir, lmdb_folder)
@@ -308,40 +346,57 @@ def set_up_lmdbs(args):
     create_lmdb(os.path.join(RESULTS_DIR, dir, subdir), lmdb_folder)
 
 
-def move_image_to_dest(src_file, dest):
-    final_destinaion = os.join.path(DESTINATION_ROOT, "data", DATA_SET, dest)
+def move_image_to_dest(args):
+    src_file = args[0]
+    dest = args[1]
+
+    final_destinaion = os.path.join(DESTINATION_ROOT, "data", DATA_SET, dest)
 
     shutil.copy2(src_file, final_destinaion)
 
 
 def copy_files_to_position():
-    dest_dir = os.join.path(DESTINATION_ROOT, "data", DATA_SET, "original_images")
-
-    try:
-        os.makedirs(dest_dir)
-    except OSError, e:
-        if e.errno != errno.EEXIST:
-            raise
 
     for source in [ORIGINAL_SUBDIR, RECALL_SUBDIR, PRECISION_SUBDIR]:
-        pool.map(move_image_to_dest,
-                 [os.path.join(TRAIN_DIR, source, x) for x in os.listdir(os.path.join(TRAIN_DIR, source))],
-                 source)
-        pool.map(move_image_to_dest,
-                 [os.path.join(TEST_DIR, source, x) for x in os.listdir(os.path.join(TEST_DIR, source))],
-                 source)
-        pool.map(move_image_to_dest,
-                 [os.path.join(VAL_DIR, source, x) for x in os.listdir(os.path.join(VAL_DIR, source))],
-                 source)
+
+        dest_dir = os.path.join(DESTINATION_ROOT, "data", DATA_SET, source)
+
+        if os.path.exists(dest_dir):
+            print(colored("Deleting {}".format(dest_dir), 'red'))
+
+            shutil.rmtree(dest_dir)
+
+        try:
+            os.makedirs(dest_dir)
+        except OSError as e:
+            if e.errno != errno.EEXIST:
+                raise
+
+        train_sources = [os.path.join(TRAIN_DIR, source, x) for x in os.listdir(os.path.join(TRAIN_DIR, source))]
+        test_sources = [os.path.join(TEST_DIR, source, x) for x in os.listdir(os.path.join(TEST_DIR, source))]
+        val_sources = [os.path.join(VAL_DIR, source, x) for x in os.listdir(os.path.join(VAL_DIR, source))]
+
+        train_sources = list(map(lambda x: [x, source], train_sources))
+        test_sources = list(map(lambda x: [x, source], test_sources))
+        val_sources = list(map(lambda x: [x, source], val_sources))
+
+        pool.map(move_image_to_dest, train_sources)
+        pool.map(move_image_to_dest, test_sources)
+        pool.map(move_image_to_dest, val_sources)
 
     for dir in [ "train", "val", "test" ]:
         for subdir in [ ORIGINAL_SUBDIR, GT_SUBDIR, RECALL_SUBDIR, PRECISION_SUBDIR ]:
             folder_name = subdir + "_" + dir + "_lmdb"
             dest_dir =  os.path.join(DESTINATION_ROOT, "compute/lmdb", DATA_SET, "256", subdir, folder_name)
 
+            if os.path.exists(dest_dir):
+                print(colored("Deleting {}".format(dest_dir), 'red'))
+
+                shutil.rmtree(dest_dir)
+
             try:
                 os.makedirs(dest_dir)
-            except OSError, e:
+            except OSError as e:
                 if e.errno != errno.EEXIST:
                     raise
 
@@ -353,14 +408,20 @@ def copy_files_to_position():
                 os.path.join(LMDB_DIR, subdir, folder_name, "lock.mdb"),
                 dest_dir)
 
-    for dir in [ "train.txt", "val.txt", "test.txt" ]:
-        dest_dir = os.path.join(DESTINATION_ROOT, "data", DATA_SET, "labels")
+    dest_dir = os.path.join(DESTINATION_ROOT, "data", DATA_SET, "labels")
 
-        try:
-            os.makedirs(dest_dir)
-        except OSError, e:
-            if e.errno != errno.EEXIST:
-                raise
+    if os.path.exists(dest_dir):
+        print(colored("Deleting {}".format(dest_dir), 'red'))
+
+        shutil.rmtree(dest_dir)
+
+    try:
+        os.makedirs(dest_dir)
+    except OSError as e:
+        if e.errno != errno.EEXIST:
+            raise
+
+    for dir in [ "train.txt", "val.txt", "test.txt" ]:
 
         shutil.copy2(os.path.join(LABELS_DIR, dir), dest_dir)
 
@@ -375,7 +436,7 @@ def create_project():
 
         try:
             shutil.copytree(src, dest)
-        except OSError, e:
+        except OSError as e:
             if e.errno != errno.EEXIST:
                 raise
 
@@ -400,7 +461,7 @@ def create_project():
 
     try:
         os.makedirs(net_dir)
-    except OSError, e:
+    except OSError as e:
         if e.errno != errno.EEXIST:
             raise
 
@@ -409,8 +470,12 @@ parser = argparse.ArgumentParser(description="Crop prepared data files and pack 
                                  into LMDB files")
 parser.add_argument('--experiment', default="", nargs=1)
 parser.add_argument('source')
-parser.add_arugment('data_set')
+parser.add_argument('data_set')
 parsed = parser.parse_args()
+
+if DESTINATION_ROOT == "":
+    print("Please set DESTINATION_ROOT")
+    exit()
 
 DATA_SET = parsed.data_set
 ORIGINAL_DIR = parsed.source
@@ -420,14 +485,23 @@ print("Source Dir: {}".format(ORIGINAL_DIR))
 print("Results Dir: {}".format(RESULTS_DIR))
 
 print("Cleaning destination folder")
-shutil.rmtree(RESULTS_DIR)
+
+try:
+    shutil.rmtree(RESULTS_DIR)
+except OSError as e:
+    if e.errno != errno.ENOENT:
+        raise
+    else:
+        debug_print("Results Dir does not already exist")
+
 
 # STEP 0 - Make sure needed directories all exist
 for dir in [ FULL_DIR, TRAIN_DIR, VAL_DIR, TEST_DIR ]:
     for subdir in [ ORIGINAL_SUBDIR, GT_SUBDIR, RECALL_SUBDIR, PRECISION_SUBDIR ]:
         try:
-            debug_print("Creating folder: {}".format(dir + subdir))
-            os.makedirs(dir + subdir)
+            full_path = os.path.join(dir, subdir)
+            debug_print("Creating folder: {}".format(full_path))
+            os.makedirs(full_path)
         except OSError as e:
             if e.errno != errno.EEXIST:
                 raise
@@ -439,22 +513,12 @@ except OSError as e:
     if e.errno != errno.EEXIST:
         raise
 
-pool = Pool()
+pool = Pool(1)
 
 # STEP 1 - Resize the original images and generate auxiliary files
 print("-- Starting STEP 1 --")
 
 pool.map(convert, list(map(lambda x: [x, True], os.listdir(ORIGINAL_DIR))))
-
-print("-- Starting STEP 1b --")
-
-all_directories = []
-all_directories += os.listdir(os.path.join(FULL_DIR, ORIGINAL_SUBDIR))
-all_directories += os.listdir(os.path.join(FULL_DIR, GT_SUBDIR))
-all_directories += os.listdir(os.path.join(FULL_DIR, RECALL_SUBDIR))
-all_directories += os.listdir(os.path.join(FULL_DIR, PRECISION_SUBDIR))
-
-pool.map(verify_file, all_directories)
 
 # STEP 2 - Generate the recall and precision weights
 print("-- Starting STEP 2 --")
@@ -472,14 +536,18 @@ for dir in [ "train", "val", "test" ]:
 pool.map(set_up_lmdbs, lmdb_dirs)
 
 # STEP 4 - Copy files to needed locations - Optional
-print("-- Starting STEP 4 --")
 
 if DATA_SET is not None:
+    print("-- Starting STEP 4 --")
     copy_files_to_position()
+else:
+    print("-- SKIPPING STEP 4 --")
 
 # STEP 5 - Set up project folder - Optional
-print("-- Starting STEP 5 --")
 
 if CREATE_PROJECT is True and DATA_SET is not None:
+    print("-- Starting STEP 5 --")
     create_project()
+else:
+    print("-- SKIPPING STEP 5 --")
 
