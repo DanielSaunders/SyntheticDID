@@ -1,4 +1,26 @@
 #!/usr/bin/env python3
+"""
+A script used to take a set of generated images and convert to LMDBs
+
+This script works in multiple phases. From a base directory which must include
+the image files as well as ground truth files, the following steps are taken:
+
+    1) Arbitrarily-sized images are cropped to 256x256 patches.
+       Companion images are generated to provide extra data during training
+       (such as recall weights)
+
+    2) Generated images are partitioned into a train-val-test set.
+
+    3) Images in each set are then packed into LMDBs.
+
+    4) (OPTIONAL) Data set gets copied to the needed destination.
+
+    5) (OPTIONAL) A new net directory can be created to allow for a new
+       experiment.
+
+This script is currently rather inflexible and makes a ton of assumptions about
+file hierarchies.
+"""
 import argparse
 import errno
 import io
@@ -20,34 +42,33 @@ if os.geteuid == 0:
 
 GRAYSCALE = True
 
-DATA_SET = None
-DESTINATION_ROOT = None
+DATA_SET = ""
+DESTINATION_ROOT = ""
 CREATE_PROJECT = False
 PROJECT_SUB_REV = ""
 PROJECT_SUB_REV_2 = ""
 PROJECT_ITER = ""
 
-SKELETON_DIR = None
+SKELETON_DIR = ""
 
-ORIGINAL_DIR = None
-RESULTS_DIR = None
-GARBAGE_DIR = None
+ORIGINAL_DIR = ""
+RESULTS_DIR = ""
 
-FULL_DIR = RESULTS_DIR + "full/"
+FULL_DIR = os.path.join(RESULTS_DIR, "full")
 
-TRAIN_DIR = RESULTS_DIR + "train/"
-VAL_DIR = RESULTS_DIR + "val/"
-TEST_DIR = RESULTS_DIR + "test/"
+TRAIN_DIR = os.path.join(RESULTS_DIR, "train")
+VAL_DIR = os.path.join(RESULTS_DIR, "val")
+TEST_DIR = os.path.join(RESULTS_DIR, "test")
 
-LABELS_DIR = RESULTS_DIR + "labels/"
+LABELS_DIR = os.path.join(RESULTS_DIR, "labels")
 
-LMDB_DIR = RESULTS_DIR + "lmdb/"
+LMDB_DIR = os.path.join(RESULTS_DIR, "lmdb")
 
 # These folders get appended to the respective train/val/test directory
-ORIGINAL_SUBDIR = "original_images/"
-GT_SUBDIR = "processed_gt/"
-RECALL_SUBDIR = "recall_weights/"
-PRECISION_SUBDIR = "precision_weights/"
+ORIGINAL_SUBDIR = "original_images"
+GT_SUBDIR = "processed_gt"
+RECALL_SUBDIR = "recall_weights"
+PRECISION_SUBDIR = "precision_weights"
 
 NUM_SAMPLES_PERIMAGE = 5
 
@@ -58,7 +79,9 @@ def debug_print(string):
         print("DEBUG: {}".format(string))
 
 def insert_value(orig, value):
-    return orig[:-4] + "_" + str(value) + orig[-4:]
+    orig_with_ext = os.path.splitext(file)
+
+    return orig_with_ext[0] + "_" + str(value) + orig_with_ext[1]
 
 
 def convert(args):
@@ -69,8 +92,9 @@ def convert(args):
         if "gt" in file:
             return
 
-        file = ORIGINAL_DIR + file
-        gt_file = file[:-4] + "_gt" + file[-4:]
+        file = os.path.join(ORIGINAL_DIR, file)
+
+        gt_file = insert_value(file, "gt")
 
         base_original = cv2.imread(file)
         base_gt = cv2.imread(gt_file)
@@ -105,22 +129,14 @@ def convert(args):
 
                 if pixel_count > 0.01 * original.shape[0] * original.shape[1]:
                     break
-                elif x == 4 and GARBAGE_DIR is not None:
-                    file = GARBAGE_DIR + os.path.basename(file)
-                    gt_file = GARBAGE_DIR + os.path.basename(gt_file)
-
-
-                    cv2.imwrite(file, original)
-                    cv2.imwrite(gt_file, gt)
-                    return
 
                 original = old_original
                 gt = old_gt
 
-            file = FULL_DIR + ORIGINAL_SUBDIR + os.path.basename(file)
-            gt_file = FULL_DIR + GT_SUBDIR + os.path.basename(file)
-            recall_file = FULL_DIR + RECALL_SUBDIR + os.path.basename(file)
-            precision_file = FULL_DIR + PRECISION_SUBDIR + os.path.basename(file)
+            file = os.path.join(FULL_DIR, ORIGINAL_SUBDIR, os.path.basename(file))
+            gt_file = os.path.join(FULL_DIR, GT_SUBDIR, os.path.basename(file))
+            recall_file = os.path.join(FULL_DIR, RECALL_SUBDIR, os.path.basename(file))
+            precision_file = os.path.join(FULL_DIR, PRECISION_SUBDIR, os.path.basename(file))
 
             # TODO: Why are some grayscale?
             if grayscale == True and len(original.shape) == 3:
@@ -160,7 +176,7 @@ def split_into_sets():
     # Since there is a 1:1 between the original files and each type of processed
     # image, we can just iterate over the original files and move each corresponding
     # processed image at the same time.
-    files = os.listdir(FULL_DIR + ORIGINAL_SUBDIR)
+    files = os.listdir(os.join.path(FULL_DIR, ORIGINAL_SUBDIR))
 
     sequence = list(range(len(files)))
     random.shuffle(sequence)
@@ -175,29 +191,34 @@ def split_into_sets():
 
         file = files[index]
 
-        if count < train_cut_off:
-            shutil.move(FULL_DIR + ORIGINAL_SUBDIR + file, TRAIN_DIR + ORIGINAL_SUBDIR + file)
-            shutil.move(FULL_DIR + GT_SUBDIR + file, TRAIN_DIR + GT_SUBDIR + file)
-            shutil.move(FULL_DIR + RECALL_SUBDIR + file, TRAIN_DIR + RECALL_SUBDIR + file)
-            shutil.move(FULL_DIR + PRECISION_SUBDIR + file, TRAIN_DIR + PRECISION_SUBDIR + file)
-        elif count < val_cut_off:
-            shutil.move(FULL_DIR + ORIGINAL_SUBDIR + file, VAL_DIR + ORIGINAL_SUBDIR + file)
-            shutil.move(FULL_DIR + GT_SUBDIR + file, VAL_DIR + GT_SUBDIR + file)
-            shutil.move(FULL_DIR + RECALL_SUBDIR + file, VAL_DIR + RECALL_SUBDIR + file)
-            shutil.move(FULL_DIR + PRECISION_SUBDIR + file, VAL_DIR + PRECISION_SUBDIR + file)
-        else:
-            shutil.move(FULL_DIR + ORIGINAL_SUBDIR + file, TEST_DIR + ORIGINAL_SUBDIR + file)
-            shutil.move(FULL_DIR + GT_SUBDIR + file, TEST_DIR + GT_SUBDIR + file)
-            shutil.move(FULL_DIR + RECALL_SUBDIR + file, TEST_DIR + RECALL_SUBDIR + file)
-            shutil.move(FULL_DIR + PRECISION_SUBDIR + file, TEST_DIR + PRECISION_SUBDIR + file)
+        original_source = os.path.join(FULL_DIR, ORIGINAL_SUBDIR, file)
+        gt_source = os.path.join(FULL_DIR, GT_SUBDIR, file)
+        recall_source = os.path.join(FULL_DIR, RECALL_SUBDIR, file)
+        precision_source = os.path.join(FULL_DIR, PRECISION_SUBDIR, file)
 
+        if count < train_cut_off:
+            target = TRAIN_DIR
+        elif count < val_cut_off:
+            target = VAL_DIR
+        else:
+            target = TEST_DIR
+
+        original_dest = os.path.join(target, ORIGINAL_SUBDIR, file)
+        gt_dest = os.path.join(target, GT_SUBDIR, file)
+        recall_dest = os.path.join(target, RECALL_SUBDIR, file)
+        precision_dest = os.path.join(target, PRECISION_SUBDIR, file)
+
+        shutil.move(original_source, original_dest)
+        shutil.move(gt_source, gt_dest)
+        shutil.move(recall_source, recall_dest)
+        shutil.move(precision_source, precision_dest)
 
 
     # Generate Label files
     for dir in [ ("train", TRAIN_DIR), ("test", TEST_DIR), ("val", VAL_DIR) ]:
-        with open("{}{}.txt".format(LABELS_DIR, dir[0]), 'w') as output:
+        with open(os.path.join(LABELS_DIR, dir[0] + ".txt"), 'w') as output:
 
-            for file in os.listdir(dir[1] + ORIGINAL_SUBDIR):
+            for file in os.listdir(os.join.path(dir[1], ORIGINAL_SUBDIR)):
 
                 output.write("./{}\n".format(file))
 
@@ -242,17 +263,6 @@ def create_lmdb(images, db_file):
         try:
             im_file = os.path.join(images, imname)
             im = process_im(im_file)
-            # remove patches containing all background
-            # if remove_background:
-                # idx = 0
-                # while idx < len(ims):
-                    # gt = gts[idx]
-                    # if gt.max() == 0:
-                        # #print "Deleting patch %d of image %s" % (idx, im_file)
-                        # del gts[idx]
-                        # del ims[idx]
-                    # else:
-                        # idx += 1
 
             doc_datum = package(im)
 
@@ -285,7 +295,8 @@ def set_up_lmdbs(args):
     # Strip off last slash
     type_name = subdir[:-1]
 
-    lmdb_folder = "{}{}{}_{}_lmdb".format(LMDB_DIR, subdir, type_name, dir)
+    lmdb_folder = "{}_{}_lmdb".format( type_name, dir)
+    lmdb_folder = os.path.join(LMDB_DIR, subdir, lmdb_folder)
 
     try:
         debug_print("Creating folder: {}".format(lmdb_folder))
@@ -294,15 +305,17 @@ def set_up_lmdbs(args):
         if e.errno != errno.EEXIST:
             raise
 
-    create_lmdb(RESULTS_DIR + dir + "/" + subdir, lmdb_folder)
+    create_lmdb(os.path.join(RESULTS_DIR, dir, subdir), lmdb_folder)
 
 
 def move_image_to_dest(src_file, dest):
-    shutil.copy2(src_file, DESTINATION_ROOT + "/data/" + DATA_SET + dest)
+    final_destinaion = os.join.path(DESTINATION_ROOT, "data", DATA_SET, dest)
+
+    shutil.copy2(src_file, final_destinaion)
 
 
 def copy_files_to_position():
-    dest_dir = DESTINATION_ROOT + "/data/" + DATA_SET + "/original_images/"
+    dest_dir = os.join.path(DESTINATION_ROOT, "data", DATA_SET, "original_images")
 
     try:
         os.makedirs(dest_dir)
@@ -310,22 +323,21 @@ def copy_files_to_position():
         if e.errno != errno.EEXIST:
             raise
 
-    for source, dest in [(ORIGINAL_SUBDIR, "/original_images/"),
-                         (RECALL_SUBDIR, "/recall_weights/"),
-                         (PRECISION_SUBDIR, "/precision_weights/")]:
+    for source in [ORIGINAL_SUBDIR, RECALL_SUBDIR, PRECISION_SUBDIR]:
         pool.map(move_image_to_dest,
-                 [TRAIN_DIR + source + x for x in os.listdir(TRAIN_DIR + source)],
-                 dest)
+                 [os.path.join(TRAIN_DIR, source, x) for x in os.listdir(os.path.join(TRAIN_DIR, source))],
+                 source)
         pool.map(move_image_to_dest,
-                 [TEST_DIR + source + x for x in os.listdir(TEST_DIR + source)],
-                 dest)
+                 [os.path.join(TEST_DIR, source, x) for x in os.listdir(os.path.join(TEST_DIR, source))],
+                 source)
         pool.map(move_image_to_dest,
-                 [VAL_DIR + source + x for x in os.listdir(VAL_DIR + source)],
-                 dest)
+                 [os.path.join(VAL_DIR, source, x) for x in os.listdir(os.path.join(VAL_DIR, source))],
+                 source)
 
     for dir in [ "train", "val", "test" ]:
         for subdir in [ ORIGINAL_SUBDIR, GT_SUBDIR, RECALL_SUBDIR, PRECISION_SUBDIR ]:
-            dest_dir =  DESTINATION_ROOT + "/compute/lmdb/" + DATA_SET + "256/" + subdir + subdir[:-1] + "_" + dir + "_lmdb/"
+            folder_name = subdir + "_" + dir + "_lmdb"
+            dest_dir =  os.path.join(DESTINATION_ROOT, "compute/lmdb", DATA_SET, "256", subdir, folder_name)
 
             try:
                 os.makedirs(dest_dir)
@@ -334,15 +346,15 @@ def copy_files_to_position():
                     raise
 
             shutil.copy2(
-                LMDB_DIR + subdir + subdir[:-1] + "_" + dir + "_lmdb/" + "data.mdb",
+                os.path.join(LMDB_DIR, subdir, folder_name, "data.mdb"),
                 dest_dir)
 
             shutil.copy2(
-                LMDB_DIR + subdir + subdir[:-1] + "_" + dir + "_lmdb/" + "lock.mdb",
+                os.path.join(LMDB_DIR, subdir, folder_name, "lock.mdb"),
                 dest_dir)
 
     for dir in [ "train.txt", "val.txt", "test.txt" ]:
-        dest_dir =  DESTINATION_ROOT + "/data/" + DATA_SET + "/labels/"
+        dest_dir = os.path.join(DESTINATION_ROOT, "data", DATA_SET, "labels")
 
         try:
             os.makedirs(dest_dir)
@@ -350,25 +362,16 @@ def copy_files_to_position():
             if e.errno != errno.EEXIST:
                 raise
 
-        shutil.copy2(LABELS_DIR + dir, dest_dir)
+        shutil.copy2(os.path.join(LABELS_DIR, dir), dest_dir)
 
 
 def create_project():
-    project_subdir = "{}/{}/{}/{}/".format(
-        DATA_SET
-        PROJECT_SUB_REV,
-        PROJECT_SUB_REV_2,
-        PROJECT_ITER)
-
-    project_subdir = re.sub(r'\/+', '/', project_subdir)
-
-    net_dir = "{}/nets/{}/".format(
-        DESTINATION_ROOT,
-        project_subdir)
+    project_subdir = os.path.join(DATA_SET, PROJECT_SUB_REV, PROJECT_SUB_REV_2, PROJECT_ITER)
+    net_dir = os.path.join(DESTINATION_ROOT, "nets", project_subdir)
 
     for file in os.listdir(SKELETON_DIR):
-        src = SKELETON_DIR + file
-        dest = net_dir + file
+        src = os.path.join(SKELETON_DIR, file)
+        dest = os.path.join(net_dir, file)
 
         try:
             shutil.copytree(src, dest)
@@ -380,7 +383,7 @@ def create_project():
     regex_project_dir = re.compile(r'DATA_SET')
 
     for file in os.listdir(net_dir):
-        if os.path.isdir(net_dir + file):
+        if os.path.isdir(os.path.join(net_dir, file)):
             continue
 
         with open(net_dir + file) as next_file:
@@ -392,7 +395,7 @@ def create_project():
             results = regex_project_dir.subn(DATA_SET, file_content)
 
         if results[1] > 0:
-            with open(net_dir + file) as next_file:
+            with open(os.path.join(net_dir, file)) as next_file:
                 next_file.write(results[0])
 
     try:
@@ -402,16 +405,16 @@ def create_project():
             raise
 
 
+parser = argparse.ArgumentParser(description="Crop prepared data files and pack \
+                                 into LMDB files")
+parser.add_argument('--experiment', default="", nargs=1)
+parser.add_argument('source')
+parser.add_arugment('data_set')
+parsed = parser.parse_args()
 
+DATA_SET = parsed.data_set
+ORIGINAL_DIR = parsed.source
 
-# parser = argparse.ArgumentParser(description="Prepare generated images for training")
-# parser.add_argument('data_dir', help="the directory in which the base images reside")
-# parser.add_argument('--overwrite-crops', help="crop images, even if cropped images already exist")
-# parser.add_argument('--overwrite-val-and-train', help="seperate into val and train, even if directories already exist")
-# parser.add_argument('--overwrite-all', help="overwrite everything, no matter what work has already been done")
-# parser.add_argument('--grayscale', help="render final images in grayscale")
-# parser.add_argument('--color', help="render final images in color")
-# parser.parse_args()
 
 print("Source Dir: {}".format(ORIGINAL_DIR))
 print("Results Dir: {}".format(RESULTS_DIR))
@@ -446,10 +449,10 @@ pool.map(convert, list(map(lambda x: [x, True], os.listdir(ORIGINAL_DIR))))
 print("-- Starting STEP 1b --")
 
 all_directories = []
-all_directories += os.listdir(FULL_DIR + ORIGINAL_SUBDIR)
-all_directories += os.listdir(FULL_DIR + GT_SUBDIR)
-all_directories += os.listdir(FULL_DIR + RECALL_SUBDIR)
-all_directories += os.listdir(FULL_DIR + PRECISION_SUBDIR)
+all_directories += os.listdir(os.path.join(FULL_DIR, ORIGINAL_SUBDIR))
+all_directories += os.listdir(os.path.join(FULL_DIR, GT_SUBDIR))
+all_directories += os.listdir(os.path.join(FULL_DIR, RECALL_SUBDIR))
+all_directories += os.listdir(os.path.join(FULL_DIR, PRECISION_SUBDIR))
 
 pool.map(verify_file, all_directories)
 
