@@ -36,6 +36,7 @@ import cv2
 import lmdb
 import matplotlib.pyplot as plt
 import numpy as np
+import scipy.ndimage as nd
 
 from natsort import natsorted
 from multiprocessing import Pool
@@ -85,8 +86,15 @@ ORIGINAL_SUBDIR = "original_images"
 GT_SUBDIR = "processed_gt"
 RECALL_SUBDIR = "recall_weights"
 PRECISION_SUBDIR = "precision_weights"
+REL_DARKNESS_SUBDIR = "relative_darkness2"
+UNIFORM_RECALL_SUBDIR = "uniform_recall_weights"
+UNIFORM_PRECISION_SUBDIR = "uniform_precision_weights"
 
-NUM_SAMPLES_PERIMAGE = 5
+RD_THRESHOLDS = [10]
+RD_SIZES = [5]
+
+NUM_PATCHES_PERIMAGE = 5
+PATCH_OFFSET = 128
 
 random.seed('hello')
 
@@ -100,11 +108,25 @@ def insert_value(orig, value):
 
     return orig_with_ext[0] + "_" + str(value) + orig_with_ext[1]
 
+def get_all_subdirs():
+    types = []
+    for type in [ ORIGINAL_SUBDIR, GT_SUBDIR, RECALL_SUBDIR, PRECISION_SUBDIR,
+                  UNIFORM_RECALL_SUBDIR, UNIFORM_PRECISION_SUBDIR]:
+        types.append(type)
+
+    for thresh in RD_THRESHOLDS:
+        for size in RD_SIZES:
+            for group in ['lower', 'middle', 'upper']:
+                type = os.path.join(REL_DARKNESS_SUBDIR, str(size), str(thresh), group)
+                types.append(type)
+
+    return types
+
 
 def update_locations(distance, first, second):
     if distance > 256:
-        first += 128
-        second += 128
+        first += PATCH_OFFSET
+        second += PATCH_OFFSET
     else:
         first += distance
         second += distance
@@ -145,6 +167,8 @@ def convert(args):
         x_block = 0
         y_block = 0
 
+        count = 0
+
         while distance_from_bottom != 0:
             while distance_from_edge != 0:
                 base_original = original.copy()
@@ -161,6 +185,8 @@ def convert(args):
                     gt_file = os.path.join(FULL_DIR, GT_SUBDIR, os.path.basename(file))
                     recall_file = os.path.join(FULL_DIR, RECALL_SUBDIR, os.path.basename(file))
                     precision_file = os.path.join(FULL_DIR, PRECISION_SUBDIR, os.path.basename(file))
+                    uniform_recall_file = os.path.join(FULL_DIR, UNIFORM_RECALL_SUBDIR, os.path.basename(file))
+                    uniform_precision_file = os.path.join(FULL_DIR, UNIFORM_PRECISION_SUBDIR, os.path.basename(file))
 
                     weighted_image = 128 * np.ones_like(cropped_partition_original)
 
@@ -169,6 +195,15 @@ def convert(args):
                     cv2.imwrite(insert_value(gt_file, iter), cropped_partition_gt)
                     cv2.imwrite(insert_value(recall_file, iter), weighted_image)
                     cv2.imwrite(insert_value(precision_file, iter), weighted_image)
+                    cv2.imwrite(insert_value(uniform_recall_file, iter), weighted_image)
+                    cv2.imwrite(insert_value(uniform_precision_file, iter), weighted_image)
+
+                    create_relative_darkness2(cropped_partition_original, os.path.basename(file), iter)
+
+                count += 1
+
+                if count != 0 and count >= NUM_PATCHES_PERIMAGE:
+                    return
 
 
                 x_block += 1
@@ -196,6 +231,63 @@ def convert(args):
         traceback.print_exc()
         raise
 
+
+def relative_darkness2(im, window_size, threshold, group):
+
+    if im.ndim == 3:
+        im = cv2.cvtColor(im, cv2.COLOR_BGR2GRAY)
+
+    # find number of pixels at least $threshold less than the center value
+    def below_thresh(vals):
+        center_val = vals[vals.shape[0]//2]
+        lower_thresh = center_val - threshold
+        return (vals < lower_thresh).sum()
+
+    # find number of pixels at least $threshold greater than the center value
+    def above_thresh(vals):
+        center_val = vals[vals.shape[0]//2]
+        above_thresh = center_val + threshold
+        return (vals > above_thresh).sum()
+
+    # apply the above function convolutionally
+    lower = nd.generic_filter(im, below_thresh, size=window_size, mode='reflect')
+    upper = nd.generic_filter(im, above_thresh, size=window_size, mode='reflect')
+
+    # number of values within $threshold of the center value is the remainder
+    # constraint: lower + middle + upper = window_size ** 2
+    middle = np.empty_like(lower)
+    middle.fill(window_size*window_size)
+    middle = middle - (lower + upper)
+
+    # scale to range [0-255]
+    lower = lower * (255 / (window_size * window_size))
+    middle = middle * (255 / (window_size * window_size))
+    upper = upper * (255 / (window_size * window_size))
+
+    if group == 'lower':
+        return lower
+    if group == 'middle':
+        return middle
+    if group == 'upper':
+        return upper
+
+    return np.concatenate( [lower[:,:,np.newaxis], middle[:,:,np.newaxis], upper[:,:,np.newaxis]], axis=2)
+
+def create_relative_darkness2(im, file, iter):
+    for thresh in RD_THRESHOLDS:
+        for size in RD_SIZES:
+            for group in ['lower', 'middle', 'upper']:
+                out_dir = os.path.join(FULL_DIR, "relative_darkness2", str(size), str(thresh), group)
+
+                if not os.path.isdir(out_dir):
+                    os.makedirs(out_dir)
+
+                new_image = relative_darkness2(im, window_size=size, threshold=thresh, group=group)
+
+                file_name = os.path.join(out_dir, file)
+                file_name = insert_value(file_name, iter)
+
+                cv2.imwrite(file_name, new_image)
 
 def verify_file(file):
     try:
@@ -229,27 +321,20 @@ def split_into_sets():
 
         file = files[index]
 
-        original_source = os.path.join(FULL_DIR, ORIGINAL_SUBDIR, file)
-        gt_source = os.path.join(FULL_DIR, GT_SUBDIR, file)
-        recall_source = os.path.join(FULL_DIR, RECALL_SUBDIR, file)
-        precision_source = os.path.join(FULL_DIR, PRECISION_SUBDIR, file)
+        for type in get_all_subdirs():
 
-        if count < train_cut_off:
-            target = TRAIN_DIR
-        elif count < val_cut_off:
-            target = VAL_DIR
-        else:
-            target = TEST_DIR
+            source = os.path.join(FULL_DIR, type, file)
 
-        original_dest = os.path.join(target, ORIGINAL_SUBDIR, file)
-        gt_dest = os.path.join(target, GT_SUBDIR, file)
-        recall_dest = os.path.join(target, RECALL_SUBDIR, file)
-        precision_dest = os.path.join(target, PRECISION_SUBDIR, file)
+            if count < train_cut_off:
+                target = TRAIN_DIR
+            elif count < val_cut_off:
+                target = VAL_DIR
+            else:
+                target = TEST_DIR
 
-        shutil.move(original_source, original_dest)
-        shutil.move(gt_source, gt_dest)
-        shutil.move(recall_source, recall_dest)
-        shutil.move(precision_source, precision_dest)
+            dest = os.path.join(target, type, file)
+
+            shutil.move(source, dest)
 
 
     # Generate Label files
@@ -330,10 +415,16 @@ def set_up_lmdbs(args):
     dir = args[0]
     subdir = args[1]
 
-    # Strip off last slash
-    type_name = subdir
+    lmdb_folder = "{}_lmdb".format(dir)
+    rest = subdir
+    while True:
+        rest, next_folder = os.path.split(rest)
 
-    lmdb_folder = "{}_{}_lmdb".format( type_name, dir)
+        if next_folder != "":
+            lmdb_folder = next_folder + "_" + lmdb_folder
+        else:
+            break
+
     lmdb_folder = os.path.join(LMDB_DIR, subdir, lmdb_folder)
 
     try:
@@ -357,7 +448,8 @@ def move_image_to_dest(args):
 
 def copy_files_to_position():
 
-    for source in [ORIGINAL_SUBDIR, RECALL_SUBDIR, PRECISION_SUBDIR]:
+    for source in [ORIGINAL_SUBDIR, RECALL_SUBDIR, PRECISION_SUBDIR,
+                   UNIFORM_RECALL_SUBDIR, UNIFORM_PRECISION_SUBDIR]:
 
         dest_dir = os.path.join(DESTINATION_ROOT, "data", DATA_SET, source)
 
@@ -384,9 +476,29 @@ def copy_files_to_position():
         pool.map(move_image_to_dest, test_sources)
         pool.map(move_image_to_dest, val_sources)
 
+    subdirs = []
+    for subdir in [ ORIGINAL_SUBDIR, GT_SUBDIR, RECALL_SUBDIR, PRECISION_SUBDIR,
+                  UNIFORM_RECALL_SUBDIR, UNIFORM_PRECISION_SUBDIR]:
+        subdirs.append(subdir)
+
+    for thresh in RD_THRESHOLDS:
+        for size in RD_SIZES:
+            for group in ['lower', 'middle', 'upper']:
+                subdir = os.path.join(REL_DARKNESS_SUBDIR, str(size), str(thresh), group)
+                subdirs.append(subdir)
+
     for dir in [ "train", "val", "test" ]:
-        for subdir in [ ORIGINAL_SUBDIR, GT_SUBDIR, RECALL_SUBDIR, PRECISION_SUBDIR ]:
-            folder_name = subdir + "_" + dir + "_lmdb"
+        for subdir in subdirs:
+            folder_name = "{}_lmdb".format(dir)
+            rest = subdir
+            while True:
+                rest, next_folder = os.path.split(rest)
+
+                if next_folder != "":
+                    folder_name = next_folder + "_" + lmdb_folder
+                else:
+                    break
+
             dest_dir =  os.path.join(DESTINATION_ROOT, "compute/lmdb", DATA_SET, "256", subdir, folder_name)
 
             if os.path.exists(dest_dir):
@@ -497,7 +609,7 @@ except OSError as e:
 
 # STEP 0 - Make sure needed directories all exist
 for dir in [ FULL_DIR, TRAIN_DIR, VAL_DIR, TEST_DIR ]:
-    for subdir in [ ORIGINAL_SUBDIR, GT_SUBDIR, RECALL_SUBDIR, PRECISION_SUBDIR ]:
+    for subdir in get_all_subdirs():
         try:
             full_path = os.path.join(dir, subdir)
             debug_print("Creating folder: {}".format(full_path))
@@ -530,10 +642,18 @@ print("-- Starting STEP 3 --")
 
 lmdb_dirs = []
 for dir in [ "train", "val", "test" ]:
-    for subdir in [ ORIGINAL_SUBDIR, GT_SUBDIR, RECALL_SUBDIR, PRECISION_SUBDIR ]:
+    for subdir in [ ORIGINAL_SUBDIR, GT_SUBDIR, RECALL_SUBDIR, PRECISION_SUBDIR,
+                  UNIFORM_RECALL_SUBDIR, UNIFORM_PRECISION_SUBDIR]:
         lmdb_dirs.append((dir, subdir))
 
+    for thresh in RD_THRESHOLDS:
+        for size in RD_SIZES:
+            for group in ['lower', 'middle', 'upper']:
+                subdir = os.path.join(REL_DARKNESS_SUBDIR, str(size), str(thresh), group)
+                lmdb_dirs.append((dir, subdir))
+
 pool.map(set_up_lmdbs, lmdb_dirs)
+exit()
 
 # STEP 4 - Copy files to needed locations - Optional
 
