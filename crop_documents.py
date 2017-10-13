@@ -168,9 +168,10 @@ def convert(args):
         y_block = 0
 
         count = 0
+        first_iter = False
 
-        while distance_from_bottom != 0:
-            while distance_from_edge != 0:
+        while distance_from_bottom != 0 or first_iter is False:
+            while distance_from_edge != 0 or first_iter is False:
                 base_original = original.copy()
                 base_gt = gt.copy()
 
@@ -201,6 +202,7 @@ def convert(args):
                     create_relative_darkness2(cropped_partition_original, os.path.basename(file), iter)
 
                 count += 1
+                first_iter = True
 
                 if count != 0 and count >= NUM_PATCHES_PERIMAGE:
                     return
@@ -448,8 +450,9 @@ def move_image_to_dest(args):
 
 def copy_files_to_position():
 
-    for source in [ORIGINAL_SUBDIR, RECALL_SUBDIR, PRECISION_SUBDIR,
-                   UNIFORM_RECALL_SUBDIR, UNIFORM_PRECISION_SUBDIR]:
+    sources = get_all_subdirs()
+
+    for source in sources:
 
         dest_dir = os.path.join(DESTINATION_ROOT, "data", DATA_SET, source)
 
@@ -476,16 +479,7 @@ def copy_files_to_position():
         pool.map(move_image_to_dest, test_sources)
         pool.map(move_image_to_dest, val_sources)
 
-    subdirs = []
-    for subdir in [ ORIGINAL_SUBDIR, GT_SUBDIR, RECALL_SUBDIR, PRECISION_SUBDIR,
-                  UNIFORM_RECALL_SUBDIR, UNIFORM_PRECISION_SUBDIR]:
-        subdirs.append(subdir)
-
-    for thresh in RD_THRESHOLDS:
-        for size in RD_SIZES:
-            for group in ['lower', 'middle', 'upper']:
-                subdir = os.path.join(REL_DARKNESS_SUBDIR, str(size), str(thresh), group)
-                subdirs.append(subdir)
+    subdirs = get_all_subdirs():
 
     for dir in [ "train", "val", "test" ]:
         for subdir in subdirs:
@@ -495,7 +489,7 @@ def copy_files_to_position():
                 rest, next_folder = os.path.split(rest)
 
                 if next_folder != "":
-                    folder_name = next_folder + "_" + lmdb_folder
+                    folder_name = next_folder + "_" + folder_name
                 else:
                     break
 
@@ -653,7 +647,6 @@ for dir in [ "train", "val", "test" ]:
                 lmdb_dirs.append((dir, subdir))
 
 pool.map(set_up_lmdbs, lmdb_dirs)
-exit()
 
 # STEP 4 - Copy files to needed locations - Optional
 
