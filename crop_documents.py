@@ -240,8 +240,9 @@ def recall_weights(im, gt):
     return cv2.bitwise_and(im, im, mask=gt)
 
 def precision_weights(gt):
-    values = cv2.morphologyEx(gt, cv2.MORPH_GRADIENT, precision_weights.kernel)
-    return values
+    values = cv2.morphologyEx(gt * 255, cv2.MORPH_GRADIENT, precision_weights.kernel)
+    values = cv2.dilate(values, precision_weights.kernel, iterations=1)
+
     values[np.where(values == 0)] = 128
 
     return values
