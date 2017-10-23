@@ -194,8 +194,10 @@ def convert(args):
                     iter = "{}_{}".format(y_block, x_block)
                     cv2.imwrite(insert_value(file, iter), cropped_partition_original)
                     cv2.imwrite(insert_value(gt_file, iter), cropped_partition_gt)
-                    cv2.imwrite(insert_value(recall_file, iter), weighted_image)
-                    cv2.imwrite(insert_value(precision_file, iter), weighted_image)
+                    cv2.imwrite(insert_value(recall_file, iter),
+                                recall_weights(cropped_partition_original, cropped_partition_gt))
+                    cv2.imwrite(insert_value(precision_file, iter),
+                                precision_weights(cropped_partition_gt))
                     cv2.imwrite(insert_value(uniform_recall_file, iter), weighted_image)
                     cv2.imwrite(insert_value(uniform_precision_file, iter), weighted_image)
 
@@ -232,6 +234,19 @@ def convert(args):
     except Exception:
         traceback.print_exc()
         raise
+
+
+def recall_weights(im, gt):
+    return cv2.bitwise_and(im, im, mask=gt)
+
+def precision_weights(gt):
+    values = cv2.morphologyEx(gt, cv2.MORPH_GRADIENT, precision_weights.kernel)
+    return values
+    values[np.where(values == 0)] = 128
+
+    return values
+
+precision_weights.kernel = np.ones((3, 3))
 
 
 def relative_darkness2(im, window_size, threshold, group):
@@ -439,7 +454,7 @@ def set_up_lmdbs(args):
     create_lmdb(os.path.join(RESULTS_DIR, dir, subdir), lmdb_folder)
 
 
-def move_image_to_dest(args):
+def copy_image_to_dest(args):
     src_file = args[0]
     dest = args[1]
 
@@ -475,11 +490,17 @@ def copy_files_to_position():
         test_sources = list(map(lambda x: [x, source], test_sources))
         val_sources = list(map(lambda x: [x, source], val_sources))
 
-        pool.map(move_image_to_dest, train_sources)
-        pool.map(move_image_to_dest, test_sources)
-        pool.map(move_image_to_dest, val_sources)
+        pool.map(copy_image_to_dest, train_sources)
+        pool.map(copy_image_to_dest, test_sources)
+        pool.map(copy_image_to_dest, val_sources)
 
-    subdirs = get_all_subdirs():
+    subdirs = get_all_subdirs()
+
+    for thresh in RD_THRESHOLDS:
+        for size in RD_SIZES:
+            for group in ['lower', 'middle', 'upper']:
+                subdir = os.path.join(REL_DARKNESS_SUBDIR, str(size), str(thresh), group)
+                subdirs.append(subdir)
 
     for dir in [ "train", "val", "test" ]:
         for subdir in subdirs:
