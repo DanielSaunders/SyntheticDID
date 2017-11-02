@@ -16,6 +16,7 @@ import image_util as util
 import numpy as np
 
 from lxml import etree
+from text_writer_state import TextWriterState
 
 HANDWRITTEN_WORDS_DIR = "/data/synthetic/handwriting/iamdb/"
 BACKGROUND_IMAGES_DIR = "/data/synthetic/backgrounds/"
@@ -138,9 +139,11 @@ class Document:
         if bypass is True:
             dprint("Adding text to image {}".format(self.random_seed, bg_full_path))
             img = cv2.imread(bg_full_path)
-            text_augmented_img = self.add_text(img)
+            if np.random.random() < 0.3:
+                img = self.add_text_fade(img)
+            img = self.add_text(img)
             cv2.imwrite(base_working_dir + str(self.random_seed) + "_augmented.png",
-                        text_augmented_img)
+                        img)
 
             self.result = base_working_dir + str(self.random_seed) + "_augmented.png"
             return
@@ -158,9 +161,11 @@ class Document:
         # Add text to degraded background image
         dprint("-{} Adding text to image {} -".format(self.random_seed, bg_full_path))
         img = cv2.imread(first_image)
-        text_augmented_img = self.add_text(img)
+        if np.random.random() < 0.3:
+            img = self.add_text_fade(img)
+        img = self.add_text(img)
         cv2.imwrite(base_working_dir + str(self.random_seed) + "_augmented.png",
-                    text_augmented_img)
+                    img)
 
 
         # Generate XML for second pass of DivaDID. Degrade image with text
@@ -206,8 +211,8 @@ class Document:
             if exception.errno != errno.EEXIST:
                 raise
 
-        dprint("File saved to {}".format(file))
         shutil.copy2(self.result, file)
+        dprint("File saved to {}".format(file))
 
         os.remove(self.result)
 
@@ -237,48 +242,68 @@ class Document:
             if exception.errno != errno.EEXIST:
                 raise
 
-        dprint("File saved to {}".format(file))
         shutil.copy2(self.result_ground_truth, file)
+        dprint("File saved to {}".format(file))
+
+    def add_text_fade(self, img):
+        """ Add text samples to given image.  """
+
+        color = np.array((53, 52, 46))
+
+        state = TextWriterState(img.shape)
+
+        word_rand_folder = random.choice(self.word_image_folder_list)
+
+        all_words = None
+
+        # Add individual words until we run out of space
+        while True:
+
+            word_image_name = random.choice(os.listdir(word_rand_folder))
+            word_full_path = word_rand_folder + word_image_name
+
+            word = cv2.imread(word_full_path)
+            new_word_space = np.full((word.shape[0] + 50, word.shape[1] + 50, 3), 255, dtype=np.uint8)
+            new_word_space[25:word.shape[0] + 25, 25:word.shape[1] + 25] = word
+            word = new_word_space
+            word = util.add_alpha_channel(word)
+
+            # if word.shape[0] == 0 or word.shape[1] == 1:
+                # continue
+
+            # word = cv2.resize(word, (new_word_width, new_word_height), cv2.INTER_CUBIC)
+
+            if state.get_next_word_pos(word.shape) is None:
+                break
+
+            color += np.random.randint(-2, 3, size=3)
+            util.white_to_alpha(word, color=color)
+
+            word = cv2.GaussianBlur(word, (51, 51), 0)
+
+            # word = np.where((word - 20) < 0, 0, word - 20)
+
+            all_words = state.get_padded_image(word)
+
+        if all_words is not None:
+            img = util.alpha_composite(img, all_words)
+
+        return img
 
     def add_text(self, img):
         """ Add text samples to given image.  """
 
-        not_done = True
         color = np.array((53, 52, 46))
 
-        # TODO
-        background_height = img.shape[0]
-        background_width = img.shape[1]
+        state = TextWriterState(img.shape)
 
-        ground_truth = np.ones((background_height, background_width, 3), np.uint8)
-
-        num_lines = np.rint(np.clip(np.random.normal(15, 4), 3, 30))
-        text_start_position = np.clip(np.random.normal(0, 0.2, 2), 0.01, 1)
-        text_end_position = np.clip(np.random.normal(1, 0.2, 2), 0, 1)
-        space_between_words = int(np.clip(np.random.normal(1, 0.1, 1), 0, 0.05) * background_width)
-
-        line_height_variation = np.clip(np.random.normal(1, 0.1, 1), -.5, .5)
-
-        avg_line_vertical_scale = (text_end_position[0] - text_start_position[0]) / num_lines
-        avg_line_height = background_height * avg_line_vertical_scale
-
-        # img = util.add_alpha_channel(img)
+        ground_truth = np.ones((img.shape[0], img.shape[1], 3), np.uint8)
 
         word_rand_folder = random.choice(self.word_image_folder_list)
-        word_image_name = random.choice(os.listdir(word_rand_folder))
-        word_full_path = word_rand_folder + word_image_name
 
-        word = cv2.imread(word_full_path)
-        word_height = word.shape[0]
-        word_width = word.shape[1]
+        all_words = None
 
-        avg_word_scale_factor = min(avg_line_height / word_height, 1.0)
-
-        x_offset = int(np.rint(text_start_position[0] * background_width))
-        y_offset = int(np.rint(text_start_position[1] * background_height))
-
-        # Add individual words until we run out of space
-        while not_done:
+        while True:
 
             word_image_name = random.choice(os.listdir(word_rand_folder))
             word_full_path = word_rand_folder + word_image_name
@@ -286,46 +311,27 @@ class Document:
             word = cv2.imread(word_full_path)
             word = util.add_alpha_channel(word)
 
-            word_height = word.shape[0]
-            word_width = word.shape[1]
+            # if word.shape[0] == 0 or word.shape[1] == 1:
+                # continue
 
-            if word.shape[0] == 0 or word.shape[1] == 1:
-                continue
-
-            new_word_width = int(np.rint(word.shape[1] * avg_word_scale_factor))
-            new_word_height = int(np.rint(word.shape[0] * avg_word_scale_factor))
-
-            if x_offset + new_word_width > int(np.rint(text_end_position[1] * background_width)):
-                if y_offset + word_height + new_word_height > int(np.rint(text_end_position[0] * background_height)):
-                    break
-
-                x_offset = int(np.rint(text_start_position[0] * background_width))
-                # y_offset += int(avg_line_height + (avg_line_height * line_height_variation))
-                y_offset += new_word_height
-
-            word = cv2.resize(word, (new_word_width, new_word_height), cv2.INTER_CUBIC)
+            if state.get_next_word_pos(word.shape) is None:
+                break
 
             color += np.random.randint(-2, 3, size=3)
             util.white_to_alpha(word, color=color)
 
-            word = cv2.copyMakeBorder(word,
-                                      y_offset,
-                                      background_height - y_offset - new_word_height,
-                                      x_offset,
-                                      background_width - x_offset - new_word_width,
-                                      cv2.BORDER_CONSTANT,
-                                      (0, 0, 0, 0))
+            all_words = state.get_padded_image(word)
 
-            ground_truth_word = word.copy()
+        if all_words is None:
+            all_words = np.zeros((*img.shape,))
 
-            img = util.alpha_composite(img, word)
-            ground_truth = util.alpha_composite(ground_truth, ground_truth_word)
-            # ground_truth.paste(ground_truth_word, mask=ground_truth_word)  # = Image.alpha_composite(ground_truth, ground_truth_word)
+        ground_truth_word = all_words.copy()
 
-            x_offset += new_word_width + space_between_words
+        img = util.alpha_composite(img, all_words)
+        ground_truth = util.alpha_composite(ground_truth, ground_truth_word)
 
         ground_truth = cv2.cvtColor(ground_truth, cv2.COLOR_BGR2GRAY)
-        retval, ground_truth = cv2.threshold(ground_truth, 20, 255, cv2.THRESH_BINARY_INV)
+        retval, ground_truth = cv2.threshold(ground_truth, 10, 255, cv2.THRESH_BINARY_INV)
 
         self.result_ground_truth = TMP_DIR + str(self.random_seed) + "_gt.png"
 

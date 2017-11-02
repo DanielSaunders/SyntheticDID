@@ -23,7 +23,8 @@ if sys.version_info < (3, 0):
     sys.stdout.write("Python 2 is not supported. Please use Python 3\n")
     sys.exit(1)
 
-DEFAULT_DIR = "/data/synthetic_trial_" + str(random.randint(10000, 100000))
+#DEFAULT_DIR = "/data/synthetic_trial_" + str(random.randint(10000, 100000))
+DEFAULT_DIR = "/data/synthetic_trial_TEST"
 
 
 def dprint(*args, **kwargs):
@@ -70,12 +71,12 @@ def generate_single_image(fn_args):
     """
     dprint("Generating image #{}".format(fn_args['iter'] + 1))
 
-    # 99585
+    # 33517_gt fails
     try:
         document = Document(fn_args['args'].stain_level,
                             fn_args['args'].text_noise_level,
                             output_loc=fn_args['args'].output_dir,
-                            seed=17045)
+                            )
 
 
         document.create(bypass=fn_args['args'].bypass_divadid)
@@ -100,7 +101,7 @@ def main():
     """
     parser = argparse.ArgumentParser(description='Generate some images.')
     parser.add_argument('output_count', metavar='N', type=check_output_count,
-                        nargs='?', default=8,
+                        nargs='?', default=10,
                         help='number of images to generate')
     parser.add_argument('stain_level', metavar='S', type=check_level,
                         nargs='?', default=1, help='amount of noise in stains')
@@ -117,7 +118,7 @@ def main():
                                               args.output_dir))
 
     # generate_single_image({'iter': 0, 'args': args})
-    pool = Pool(1)
+    pool = Pool()
 
     pool.map(generate_single_image,
              list(map(lambda x: {'iter': x, 'args': args},
