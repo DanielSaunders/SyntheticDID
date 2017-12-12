@@ -23,11 +23,17 @@ if sys.version_info < (3, 0):
     sys.stdout.write("Python 2 is not supported. Please use Python 3\n")
     sys.exit(1)
 
-#DEFAULT_DIR = "/data/synthetic_trial_" + str(random.randint(10000, 100000))
-DEFAULT_DIR = "/data/synthetic_trial_TEST"
+DEFAULT_DIR = "/tmp/synthetic_trial_" + str(random.randint(10000, 100000))
 
 
 def dprint(*args, **kwargs):
+    """
+    A debug print function
+
+    This is valuable as this program uses the multiprocessing library. This
+    function will prepend every line with the currrent process number. (Note
+    this is not the PID)
+    """
     print(str(multiprocessing.current_process()._identity[0]) + ": " + " ".join(map(str, args)), **kwargs)
 
 
@@ -46,22 +52,6 @@ def check_output_count(value):
     return value
 
 
-def check_level(value):
-    """
-    Custom `type` function for argparse to check for valid level args
-
-    A custom function that verifies that values passed into the program as
-    --stain_level and --text_noise_level are valid. Valid means integers
-    between 1 and 5 inclusive.
-    """
-    value = int(value)
-    if value < 1 or value > 5:
-        raise argparse.ArgumentTypeError(
-            "Level values must be between 1 and 5")
-
-    return value
-
-
 def generate_single_image(fn_args):
     """
     Generate and save a single image
@@ -71,13 +61,8 @@ def generate_single_image(fn_args):
     """
     dprint("Generating image #{}".format(fn_args['iter'] + 1))
 
-    # 33517_gt fails
     try:
-        document = Document(fn_args['args'].stain_level,
-                            fn_args['args'].text_noise_level,
-                            output_loc=fn_args['args'].output_dir,
-                            )
-
+        document = Document(output_loc=fn_args['args'].output_dir)
 
         document.create(bypass=fn_args['args'].bypass_divadid)
         document.save()
@@ -103,10 +88,6 @@ def main():
     parser.add_argument('output_count', metavar='N', type=check_output_count,
                         nargs='?', default=10,
                         help='number of images to generate')
-    parser.add_argument('stain_level', metavar='S', type=check_level,
-                        nargs='?', default=1, help='amount of noise in stains')
-    parser.add_argument('text_noise_level', metavar='T', type=check_level,
-                        nargs='?', default=1, help='amount of noise in text')
     parser.add_argument('--output_dir', metavar='DIR', default=DEFAULT_DIR,
                         help='directory where final images are to be saved')
     parser.add_argument('--bypass_divadid', action='store_true',
@@ -117,6 +98,8 @@ def main():
     print("Generating {} images in {}".format(args.output_count,
                                               args.output_dir))
 
+    # Uncomment this line and comment out the pool = Pool() line to aid in
+    # debugging
     # generate_single_image({'iter': 0, 'args': args})
     pool = Pool()
 
