@@ -1,78 +1,76 @@
 # SyntheticDID
 
-This documentation will cover how to correctly generate synthesized images for training neural-networks
+Generate simulated handwritten texts to use as supplementary data for machine
+learning tasks.
 
-Requirements:
-    OpenCV, Python(currently using 3.5.2), Java(currently using 1.8.0_101)
+## Requirements
 
-References:
-    https://diuf.unifr.ch/main/hisdoc/divadid-document-image-degradation
+* OpenCV
+* Python 3
+* Java JRE
 
-1. script_generator.py
-    *The python file takes in the following parameters:
-        1. number of outputs
-        2. stain level(float:1-5)
-        3. text noisiness level(float:1-5)
-    
-    *And performs the following actions:
-    
-        1.Generates the XML file, which then gets run by using the following command using
-        DivaDid:
-            java -jar DivaDid.jar data_generator_script.xml
-        Running this script will generate synthesized degraded documents(in "data/outputs")
-    
-        2.Generates the blank images(in "data/blank_bgs/") with the sizes matching
-        the randomly chosen background images, which will be used to generate 
-        ground truths files(in "data/ground_truths")
+## Usage
 
-        3. Generates another XML file named "match_generator_script.xml", which gets
-        run by using the following command:
-            java -jar DivaDid.jar match_generator_script.xml
-        This command performs the same actions as the "data_generator_script.xml", 
-        except it's on the corresponding blank backgrounds, right after this, you 
-        should run:
-            python ground_truth_binarization_script.py
-        to finish generating the ground truth images which are in "data/ground_truths".
-    
-    *To specify the paths for the folders containing your word images, edit paths
-    in "paths/word_image_folder_paths.txt", putting word folders in "data/input_words"
-    is recommended.
-    
-    *To specify the paths for the folders containing your background images, edit
-    paths in "paths/word_bg_folder_paths.txt", putting background folders in "data/input_bgs"
-    is recommended.
-    
-    *To specify the paths for the folders containing your stain patches, edit paths in 
-    "paths/stain_folder_paths.txt", putting stain image folders in "data/stains" is 
-    recommended.
-    
-    *The python file also takes in the text noisiness level and apply a series of 
-    transformations to each randomly chosen word. The transformed images are located
-    at "data/transformed_words".
-    
-2. clear.py
-    *For convenience, this file clears all the images in "data/blank_bgs/", 
-    "data/ground_truths", "data/outputs" and "data/transformed_words". So user can 
-    regenerate images without having to hand-delete the images before.
-    
-3. ground_truth_binarization_script.py
-    *This python file converts the DivaDid version of the ground truth to black & white.
-    Since the raw images created by command 
-    "java -jar DivaDid.jar match_generator_script.xml"
-    are not black & white. All the ground truth files are in "data/ground_truths"
-    
-Example:
-    To generate 5 synthesized images with stain level = 1 and text noisiness 
-    level = 1, run:
-        
-        python script_generator.py 5 1 1
-        
-        java -jar DivaDid.jar data_generator_script.xml
-        
-    To generate the corresponding ground-truth
-    
-        java -jar DivaDid.jar match_generator_script.xml
-        
-        python ground_truth_binarization_script.py
-        
-    Repeat the process to generate more images with different parameters.
+In order to generate synthetic images, a few prerequisites are necessary.
+These scripts depend on access to a set of files:
+
+1. Background images (i.e. the pages the text will be placed on)
+1. Handwriting samples
+1. Stains to place on the pages
+
+By default, these need to be placed in `background_images/`, `handwriting_images/`,
+and `stain_imges/` folders relative to the root of this repository.
+
+To get started, some good sources to get some representative data for each data
+type follow.
+
+#### Background Images
+
+#### Handwriting Samples
+
+A good dataset to use is the
+[IAM Handwriting Database](http://www.fki.inf.unibe.ch/databases/iam-handwriting-database)
+which is available free for non-commercial research usage. Note that
+downloading the database will require registration.
+
+**N.B.** All handwriting samples should be black text on a white background
+
+#### Stains
+
+A good collection of stains is provided by
+[DIVADid](https://diuf.unifr.ch/main/hisdoc/divadid-document-image-degradation)
+itself. The small stains can be downloaded
+[here](http://diuf.unifr.ch/diva/divadid/spots.zip) and larger stains can be
+downloaded [here](http://diuf.unifr.ch/diva/divadid/surfaces.zip)
+
+### Generating Synthetic Images
+
+Once the required data files are in place, a simple demonstration of running
+the script is
+
+```bash
+./generate_images.py 10
+```
+
+which will generate 10 synthetic images in a folder (by default in `tmp/`).
+
+Options can be specified by editing the `options.ini` file or passed in on
+the command line. For example,
+
+```bash
+./generate_images.py --output_dir=~/synthetic_images 10
+```
+
+will generate 10 images and save them in the `~/synthetic_images` directory.
+
+## Explanation of Process
+
+There are three high-level steps to the process of generating these synthetic
+images.
+
+1. Add degradations to paper images
+1. Alpha blend text to paper documents
+1. Further degrade images
+
+  All degradation is done with
+  [DIVADid](https://diuf.unifr.ch/main/hisdoc/divadid-document-image-degradation).

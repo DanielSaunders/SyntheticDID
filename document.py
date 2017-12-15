@@ -3,6 +3,7 @@ A synthetic handwritten Document
 
 This module includes the Document class.
 """
+import configparser
 import errno
 import multiprocessing
 import os
@@ -18,13 +19,16 @@ import numpy as np
 from lxml import etree
 from text_writer_state import TextWriterState
 
-HANDWRITTEN_WORDS_DIR = "/data/synthetic/handwriting/iamdb/"
-BACKGROUND_IMAGES_DIR = "/data/synthetic/backgrounds/"
-STAIN_IMAGES_DIR = "/data/synthetic/spots/"
-DEFAULT_OUTPUT_DIR = "/tmp/"
+CONFIG = configparser.ConfigParser()
+
+HANDWRITTEN_WORDS_DIR = config['SETTINGS']['handwritten_words_dir']
+BACKGROUND_IMAGES_DIR = config['SETTINGS']['backgroun_images_dir']
+STAIN_IMAGES_DIR = config['SETTINGS']['stain_images_dir']
+DEFAULT_BASE_OUTPUT_DIR = config['SETTINGS']['default_base_output_dir']
 
 # /dev/shm should be mounted in RAM - allowing for fast IPC (Used as a
 # consequence of using DivaDID.)
+# If that does not work, just use /tmp
 TMP_DIR = "/dev/shm/"
 
 def dprint(*args, **kwargs):
@@ -35,7 +39,8 @@ def dprint(*args, **kwargs):
     function will prepend every line with the currrent process number. (Note
     this is not the PID)
     """
-    print(str(multiprocessing.current_process()._identity[0]) + ": " + " ".join(map(str, args)), **kwargs)
+    print(str(multiprocessing.current_process()._identity[0]) + ": "
+          + " ".join(map(str, args)), **kwargs)
 
 
 class Document:
@@ -47,7 +52,8 @@ class Document:
     allow for the saving of the generated images to disk.
     """
 
-    def __init__(self, seed=None, output_loc=DEFAULT_OUTPUT_DIR):
+    def __init__(self, stain_level=1, noise_level=1,seed=None,
+                 output_loc=DEFAULT_BASE_OUTPUT_DIR):
         """
         Initialize a new Document
 
@@ -55,6 +61,10 @@ class Document:
         ----------
         seed : int, optional
             The random seed to use for this document
+        stain_level : int, optional
+            A value that is passed to DivaDID to determine amount of staining
+        noise_level : int, optional
+            A value that is passed to DivaDID to determine amount of noise
         output_loc : str, optional
             The location the final document will be saved to
 
@@ -67,6 +77,14 @@ class Document:
         instance is accesed by more than one thread or process, all member
         functions can be safely called without concern about locks.
         """
+
+        if not os.path.isfile(HANDWRITTEN_WORDS_DIR):
+            raise OSError("{} folder for handwritten documents does not exist".format(HANDWRITTEN_WORDS_DIR)))
+        if not os.path.isfile(BACKGROUND_IMAGES_DIR):
+            raise OSError("{} folder for background images does not exist".format(BACKGROUND_IMAGES_DIR)))
+        if not os.path.isfile(STAIN_IMAGES_DIR):
+            raise OSError("{} folder for stain images does not exist".format(STAIN_IMAGES_DIR)))
+
         self.stain_level = stain_level
         self.text_noisy_level = noise_level
 
@@ -81,6 +99,8 @@ class Document:
         else:
             self._assign_random_seed()
 
+        # Seed both the python and numpy random number generators, so that we
+        # can guarantee some sort of determinacy.
         random.seed(self.random_seed)
         np.random.seed(self.random_seed)
 
@@ -164,7 +184,7 @@ class Document:
         bg_full_path = BACKGROUND_IMAGES_DIR + bg_image_name
 
         if bypass is True:
-            dprint("Adding text to image {}".format(self.random_seed, bg_full_path))
+            dprint("Adding text to image {}".format(bg_full_path))
             img = cv2.imread(bg_full_path)
             if img is None:
                 return
@@ -180,9 +200,9 @@ class Document:
         # Generate XML for DivaDID and then degrade background image
         dprint("- Generating degraded image - pass 1")
         first_xml, first_image = self._generate_degradation_xml(bg_full_path,
-                                                             1,
-                                                             True,
-                                                             base_working_dir)
+                                                                1,
+                                                                True,
+                                                                base_working_dir)
 
         subprocess.check_call(["java", "-jar", "DivaDid.jar", first_xml],
                               stdout=subprocess.DEVNULL)
@@ -235,7 +255,7 @@ class Document:
 
         if self.result is None:
             dprint("Trying to save document before it has been generated.",
-                  file=sys.stderr)
+                   file=sys.stderr)
             return
 
         if file is None:
@@ -271,7 +291,7 @@ class Document:
 
         if self.result is None:
             dprint("Trying to save document before it has been generated.",
-                  file=sys.stderr)
+                   file=sys.stderr)
             return
 
         if file is None:
@@ -326,7 +346,9 @@ class Document:
             word_full_path = word_rand_folder + word_image_name
 
             word = cv2.imread(word_full_path)
-            new_word_space = np.full((word.shape[0] + 50, word.shape[1] + 50, 3), 255, dtype=np.uint8)
+            new_word_space = np.full((word.shape[0] + 50, word.shape[1] + 50, 3),
+                                     255,
+                                     dtype=np.uint8)
             new_word_space[25:word.shape[0] + 25, 25:word.shape[1] + 25] = word
             word = new_word_space
             word = util.add_alpha_channel(word)
@@ -412,7 +434,7 @@ class Document:
         ground_truth = util.alpha_composite(ground_truth, ground_truth_word)
 
         ground_truth = cv2.cvtColor(ground_truth, cv2.COLOR_BGR2GRAY)
-        retval, ground_truth = cv2.threshold(ground_truth, 10, 1, cv2.THRESH_BINARY)
+        _, ground_truth = cv2.threshold(ground_truth, 10, 1, cv2.THRESH_BINARY)
 
         self.result_ground_truth = TMP_DIR + str(self.random_seed) + "_gt.png"
 
@@ -421,10 +443,10 @@ class Document:
         return img
 
     def _generate_degradation_xml(self,
-                                 base_image,
-                                 index=0,
-                                 save=False,
-                                 save_location=None):
+                                  base_image,
+                                  index=0,
+                                  save=False,
+                                  save_location=None):
         """
         Generate the XML needed by DivaDID to add surface stains to an image.
 
@@ -432,17 +454,22 @@ class Document:
         ----------
         base_image : str
             The path of the image that DivaDID will apply degradations to
-        index : 
-            ???
+        index : int
+            Used to differentiate between different DivaDID stages
         save : bool
             Whether to save the generated xml or not
         save_location : str
-            The path the generated xml will be saved to 
+            The path the generated xml will be saved to
 
         Returns
         -------
         etree.Element
             The root element of the xml tree
+
+        OR
+
+        xml_full_pth : str
+        output_full_pth : str
 
         This function takes the given base image and creates the XML that will
         be fed to DivaDID which specifies how to add a variety of surface

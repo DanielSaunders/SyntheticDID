@@ -34,7 +34,8 @@ def dprint(*args, **kwargs):
     function will prepend every line with the currrent process number. (Note
     this is not the PID)
     """
-    print(str(multiprocessing.current_process()._identity[0]) + ": " + " ".join(map(str, args)), **kwargs)
+    print(str(multiprocessing.current_process()._identity[0]) + 
+          ": " + " ".join(map(str, args)), **kwargs)
 
 
 def check_output_count(value):
@@ -52,9 +53,29 @@ def check_output_count(value):
     return value
 
 
+def check_level(value):
+    """
+    Custom `type` function for argparse to check for valid level args
+
+    A custom function that verifies that values passed into the program as
+    --stain_level and --text_noise_level are valid. Valid means integers
+    between 1 and 5 inclusive.
+    """
+    value = int(value)
+    if value < 1 or value > 5:
+        raise argparse.ArgumentTypeError(
+            "Level values must be between 1 and 5")
+
+    return value
+
+
 def generate_single_image(fn_args):
     """
     Generate and save a single image
+
+    Parameters
+    ----------
+    fn_args : argparse.Namespace
 
     Using arguments passed in the command line, generate a single image and
     save it to the given output directory.
@@ -62,7 +83,9 @@ def generate_single_image(fn_args):
     dprint("Generating image #{}".format(fn_args['iter'] + 1))
 
     try:
-        document = Document(output_loc=fn_args['args'].output_dir)
+        document = Document(fn_args['args'].stain_level,
+                            fn_args['args'].text_noise_level,
+                            output_loc=fn_args['args'].output_dir)
 
         document.create(bypass=fn_args['args'].bypass_divadid)
         document.save()
@@ -77,6 +100,7 @@ def generate_single_image(fn_args):
         with open("errors.txt", "a+") as errors:
             errors.write("{}\n".format(document.random_seed))
 
+
 def main():
     """
     Main entrance point into program
@@ -88,6 +112,10 @@ def main():
     parser.add_argument('output_count', metavar='N', type=check_output_count,
                         nargs='?', default=10,
                         help='number of images to generate')
+    parser.add_argument('stain_level', metavar='S', type=check_level,
+                        nargs='?', default=1, help='amount of noise in stains')
+    parser.add_argument('text_noise_level', metavar='T', type=check_level,
+                        nargs='?', default=1, help='amount of noise in text')
     parser.add_argument('--output_dir', metavar='DIR', default=DEFAULT_DIR,
                         help='directory where final images are to be saved')
     parser.add_argument('--bypass_divadid', action='store_true',
