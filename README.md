@@ -1,4 +1,4 @@
-# SyntheticDID
+# SyntheticDocuments
 
 Generate simulated handwritten texts to use as supplementary data for machine
 learning tasks.
