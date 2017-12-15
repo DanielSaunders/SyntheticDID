@@ -11,6 +11,7 @@ which are the absolute binarized form of the text documents. That means that
 the binarized data is exclusively the text itself, and not other noise.
 """
 import argparse
+import configparser
 import multiprocessing
 import random
 import sys
@@ -23,7 +24,12 @@ if sys.version_info < (3, 0):
     sys.stdout.write("Python 2 is not supported. Please use Python 3\n")
     sys.exit(1)
 
-DEFAULT_DIR = "/tmp/synthetic_trial_" + str(random.randint(10000, 100000))
+CONFIG = configparser.ConfigParser()
+
+DEFAULT_OUTPUT_DIR = os.path.join(CONFIG['DIRECTORIES']['base_output_dir'],
+                                  "synthetic_trial_" + str(random.randint(10000, 100000)))
+DEFAULT_STAIN_LEVEL = CONFIG['IMAGES']['stain_level']
+DEFAULT_NOISE_LEVEL = CONFIG['IMAGES']['noise_leve']
 
 
 def dprint(*args, **kwargs):
@@ -34,7 +40,7 @@ def dprint(*args, **kwargs):
     function will prepend every line with the currrent process number. (Note
     this is not the PID)
     """
-    print(str(multiprocessing.current_process()._identity[0]) + 
+    print(str(multiprocessing.current_process()._identity[0]) +
           ": " + " ".join(map(str, args)), **kwargs)
 
 
@@ -113,10 +119,10 @@ def main():
                         nargs='?', default=10,
                         help='number of images to generate')
     parser.add_argument('stain_level', metavar='S', type=check_level,
-                        nargs='?', default=1, help='amount of noise in stains')
+                        nargs='?', default=DEFAULT_STAIN_LEVEL, help='amount of noise in stains')
     parser.add_argument('text_noise_level', metavar='T', type=check_level,
-                        nargs='?', default=1, help='amount of noise in text')
-    parser.add_argument('--output_dir', metavar='DIR', default=DEFAULT_DIR,
+                        nargs='?', default=DEFAULT_NOISE_LEVEL, help='amount of noise in text')
+    parser.add_argument('--output_dir', metavar='DIR', default=DEFAULT_OUTPUT_DIR,
                         help='directory where final images are to be saved')
     parser.add_argument('--bypass_divadid', action='store_true',
                         help="do not pass images through DivaDID")

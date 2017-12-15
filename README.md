@@ -72,5 +72,7 @@ images.
 1. Alpha blend text to paper documents
 1. Further degrade images
 
-  All degradation is done with
-  [DIVADid](https://diuf.unifr.ch/main/hisdoc/divadid-document-image-degradation).
+See
+[DIVADid](https://diuf.unifr.ch/main/hisdoc/divadid-document-image-degradation)
+for information on how the degradations are performed, as DIVADid is used
+for all degradations.

@@ -21,15 +21,15 @@ from text_writer_state import TextWriterState
 
 CONFIG = configparser.ConfigParser()
 
-HANDWRITTEN_WORDS_DIR = config['SETTINGS']['handwritten_words_dir']
-BACKGROUND_IMAGES_DIR = config['SETTINGS']['backgroun_images_dir']
-STAIN_IMAGES_DIR = config['SETTINGS']['stain_images_dir']
-DEFAULT_BASE_OUTPUT_DIR = config['SETTINGS']['default_base_output_dir']
+HANDWRITTEN_WORDS_DIR = CONFIG['DIRECTORIES']['handwritten_words_dir']
+BACKGROUND_IMAGES_DIR = CONFIG['DIRECTORIES']['backgroun_images_dir']
+STAIN_IMAGES_DIR = CONFIG['DIRECTORIES']['stain_images_dir']
+DEFAULT_BASE_OUTPUT_DIR = CONFIG['DIRECTORIES']['default_base_output_dir']
 
 # /dev/shm should be mounted in RAM - allowing for fast IPC (Used as a
 # consequence of using DivaDID.)
 # If that does not work, just use /tmp
-TMP_DIR = "/dev/shm/"
+TMP_DIR = CONFIG['DIRECTORIES']['tmp_dir']
 
 def dprint(*args, **kwargs):
     """
