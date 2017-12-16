@@ -1,2 +1,0 @@
-data/stains/spots/
-data/stains/surfaces/

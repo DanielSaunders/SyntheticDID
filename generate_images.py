@@ -13,10 +13,13 @@ the binarized data is exclusively the text itself, and not other noise.
 import argparse
 import configparser
 import multiprocessing
+import os
 import random
 import sys
+
 from multiprocessing import Pool
 from document import Document
+
 import cv2
 
 # Check to make sure that we are using Python 3
@@ -25,11 +28,12 @@ if sys.version_info < (3, 0):
     sys.exit(1)
 
 CONFIG = configparser.ConfigParser()
+CONFIG.read("settings.ini")
 
 DEFAULT_OUTPUT_DIR = os.path.join(CONFIG['DIRECTORIES']['base_output_dir'],
                                   "synthetic_trial_" + str(random.randint(10000, 100000)))
 DEFAULT_STAIN_LEVEL = CONFIG['IMAGES']['stain_level']
-DEFAULT_NOISE_LEVEL = CONFIG['IMAGES']['noise_leve']
+DEFAULT_NOISE_LEVEL = CONFIG['IMAGES']['noise_level']
 
 
 def dprint(*args, **kwargs):

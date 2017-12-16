@@ -20,11 +20,12 @@ from lxml import etree
 from text_writer_state import TextWriterState
 
 CONFIG = configparser.ConfigParser()
+CONFIG.read("settings.ini")
 
 HANDWRITTEN_WORDS_DIR = CONFIG['DIRECTORIES']['handwritten_words_dir']
-BACKGROUND_IMAGES_DIR = CONFIG['DIRECTORIES']['backgroun_images_dir']
+BACKGROUND_IMAGES_DIR = CONFIG['DIRECTORIES']['background_images_dir']
 STAIN_IMAGES_DIR = CONFIG['DIRECTORIES']['stain_images_dir']
-DEFAULT_BASE_OUTPUT_DIR = CONFIG['DIRECTORIES']['default_base_output_dir']
+DEFAULT_BASE_OUTPUT_DIR = CONFIG['DIRECTORIES']['base_output_dir']
 
 # /dev/shm should be mounted in RAM - allowing for fast IPC (Used as a
 # consequence of using DivaDID.)
@@ -78,12 +79,12 @@ class Document:
         functions can be safely called without concern about locks.
         """
 
-        if not os.path.isfile(HANDWRITTEN_WORDS_DIR):
-            raise OSError("{} folder for handwritten documents does not exist".format(HANDWRITTEN_WORDS_DIR)))
-        if not os.path.isfile(BACKGROUND_IMAGES_DIR):
-            raise OSError("{} folder for background images does not exist".format(BACKGROUND_IMAGES_DIR)))
-        if not os.path.isfile(STAIN_IMAGES_DIR):
-            raise OSError("{} folder for stain images does not exist".format(STAIN_IMAGES_DIR)))
+        if not os.path.isdir(HANDWRITTEN_WORDS_DIR):
+            raise OSError("{} folder for handwritten documents does not exist".format(HANDWRITTEN_WORDS_DIR))
+        if not os.path.isdir(BACKGROUND_IMAGES_DIR):
+            raise OSError("{} folder for background images does not exist".format(BACKGROUND_IMAGES_DIR))
+        if not os.path.isdir(STAIN_IMAGES_DIR):
+            raise OSError("{} folder for stain images does not exist".format(STAIN_IMAGES_DIR))
 
         self.stain_level = stain_level
         self.text_noisy_level = noise_level
@@ -140,20 +141,20 @@ class Document:
     def _gather_data_sources(self):
         """ Parse lists of needed directories. """
 
-        self.word_image_folder_list = []
+        self.word_image_folder_list = [HANDWRITTEN_WORDS_DIR]
+        return
 
-        for hw_dir in os.listdir(HANDWRITTEN_WORDS_DIR):
-            files = os.listdir(HANDWRITTEN_WORDS_DIR + hw_dir)
+        # self.word_image_folder_list = []
 
-            new_path = HANDWRITTEN_WORDS_DIR + hw_dir + "/"
+        # for hw_dir in os.listdir(HANDWRITTEN_WORDS_DIR):
+        #     new_path = os.path.join(HANDWRITTEN_WORDS_DIR, hw_dir)
 
-            for idx, item in enumerate(files):
-                # subfolders = os.listdir(new_path + item)
+        #     files = os.listdir(new_path)
 
-                # for idx, sub_folder_item in enumerate(subfolders):
-                files[idx] = new_path + item + "/"
+        #     for idx, item in enumerate(files):
+        #         files[idx] = os.path.join(new_path, item)
 
-            self.word_image_folder_list += files
+        #     self.word_image_folder_list += files
 
     def create(self, bypass=False):
         """
@@ -181,7 +182,7 @@ class Document:
         # Get a random background image
         bg_image_name = random.choice(os.listdir(BACKGROUND_IMAGES_DIR))
 
-        bg_full_path = BACKGROUND_IMAGES_DIR + bg_image_name
+        bg_full_path = os.path.join(BACKGROUND_IMAGES_DIR, bg_image_name)
 
         if bypass is True:
             dprint("Adding text to image {}".format(bg_full_path))
@@ -191,10 +192,13 @@ class Document:
             if np.random.random() < 0.3:
                 img = self._add_text_fade(img)
             img = self._add_text(img)
-            cv2.imwrite(base_working_dir + str(self.random_seed) + "_augmented.png",
-                        img)
 
-            self.result = base_working_dir + str(self.random_seed) + "_augmented.png"
+            filename = str(self.random_seed) + "_augmented.png"
+            path = os.path.join(base_working_dir, filename)
+
+            cv2.imwrite(path, img)
+
+            self.result = path
             return
 
         # Generate XML for DivaDID and then degrade background image
@@ -217,14 +221,16 @@ class Document:
         if np.random.random() < 0.3:
             img = self._add_text_fade(img)
         img = self._add_text(img)
-        cv2.imwrite(base_working_dir + str(self.random_seed) + "_augmented.png",
-                    img)
+
+        filename = str(self.random_seed) + "_augmented.png"
+        path = os.path.join(base_working_dir, filename)
+        cv2.imwrite(path, img)
 
 
         # Generate XML for second pass of DivaDID. Degrade image with text
         dprint("- Generating degraded image - pass 2")
         second_xml, second_image = self._generate_degradation_xml(
-            base_working_dir + str(self.random_seed) + "_augmented.png",
+            path,
             2,
             True,
             base_working_dir)
@@ -261,7 +267,7 @@ class Document:
         if file is None:
             file = "img_{}.png".format(self.random_seed)
 
-        file = self.output_dir + '/' + file
+        file = os.path.join(self.output_dir, file)
 
         try:
             os.makedirs(self.output_dir)
@@ -297,7 +303,7 @@ class Document:
         if file is None:
             file = "img_{}_gt.png".format(self.random_seed)
 
-        file = self.output_dir + '/' + file
+        file = os.path.join(self.output_dir, file)
 
         try:
             os.makedirs(self.output_dir)
@@ -343,7 +349,7 @@ class Document:
         while True:
 
             word_image_name = random.choice(os.listdir(word_rand_folder))
-            word_full_path = word_rand_folder + word_image_name
+            word_full_path = os.path.join(word_rand_folder, word_image_name)
 
             word = cv2.imread(word_full_path)
             new_word_space = np.full((word.shape[0] + 50, word.shape[1] + 50, 3),
@@ -408,7 +414,7 @@ class Document:
         while True:
 
             word_image_name = random.choice(os.listdir(word_rand_folder))
-            word_full_path = word_rand_folder + word_image_name
+            word_full_path = os.path.join(word_rand_folder, word_image_name)
 
             word = cv2.imread(word_full_path)
             word = util.add_alpha_channel(word)
@@ -436,7 +442,7 @@ class Document:
         ground_truth = cv2.cvtColor(ground_truth, cv2.COLOR_BGR2GRAY)
         _, ground_truth = cv2.threshold(ground_truth, 10, 1, cv2.THRESH_BINARY)
 
-        self.result_ground_truth = TMP_DIR + str(self.random_seed) + "_gt.png"
+        self.result_ground_truth = os.path.join(TMP_DIR, str(self.random_seed) + "_gt.png")
 
         cv2.imwrite(self.result_ground_truth, ground_truth)
 
@@ -491,11 +497,11 @@ class Document:
         stain_density_high_bound = 2 + 0.1 * self.stain_level
 
         if save_location is None:
-            xml_full_path = "data/xml/" + xml_file_name
-            output_full_path = "data/output/" + output_file_name
+            xml_full_path = os.path.join("data/xml/", xml_file_name)
+            output_full_path = os.path.join("data/output/", output_file_name)
         else:
-            xml_full_path = save_location + xml_file_name
-            output_full_path = save_location + output_file_name
+            xml_full_path = os.path.join(save_location, xml_file_name)
+            output_full_path = os.path.join(save_location, output_file_name)
 
         root = etree.Element("root")
 

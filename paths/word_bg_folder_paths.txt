@@ -1,2 +1,0 @@
-data/input_bgs/inputs_bg1/
-data/input_bgs/inputs_bg2/

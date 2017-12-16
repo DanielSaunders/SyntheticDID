@@ -1,2 +1,0 @@
-data/transformed_words/a01-000u/
-data/transformed_words/a01-000x/
